@@ -1,0 +1,644 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Session Orchestrator</title>
+<style>
+:root{color-scheme:dark;--bg:#0e1013;--fg:#cfd4db;--mut:#7a828c;--acc:#f2a65a}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);overflow:hidden;font:11px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+#hud{display:flex;justify-content:space-between;align-items:center;height:36px;padding:0 16px;box-sizing:border-box;letter-spacing:.14em;text-transform:uppercase;color:var(--mut);white-space:nowrap;gap:12px}
+#hud b{color:var(--fg);font-weight:600}
+#hud i{font-style:normal;color:var(--acc)}
+#stage{overflow:auto;height:calc(100% - 36px)}
+body.nohud #hud{display:none}
+body.nohud #stage{height:100%}
+canvas{display:block;margin:0 auto}
+@media(max-width:600px){#hud{padding:0 10px;letter-spacing:.06em;font-size:10px}#hud span:first-child{display:none}#hud{justify-content:center}}
+</style>
+</head>
+<body>
+<div id="hud"><span>Session Orchestrator</span><span id="stat"></span></div>
+<div id="stage"><canvas id="cv" aria-label="Agent office"></canvas></div>
+<script>
+(() => {
+'use strict';
+const Q = new URLSearchParams(location.search);
+const DEMO = Q.has('demo');
+const SPEED = Number(Q.get('speed')) || 1;
+const NIGHT = Q.has('night');
+const HUD = Q.get('hud') !== '0';
+if (!HUD) document.body.classList.add('nohud');
+
+const WW = 760, ROOF = 34, GROUND = 14, X0 = 138, STEP = 85, MAXS = 6, EX = 684, LEFT = 116, WALL_R = 738;
+const LABEL_W = 86, HF_MIN = 84, HF_MAX = 128, MIN_SCALE = 0.8, LOBBY = '__lobby';
+const FONT = 'ui-monospace,SFMono-Regular,Menlo,Consolas,monospace';
+const TEXTS = ["got a sec?", "PR's up", "handing off", "need eyes", "done!"];
+const ACC = '#f2a65a';
+const TONES = ['#aab2bb', '#8f98a2', '#c3c9d0', '#79828c'];
+
+const lerp = (a, b, t) => a + (b - a) * t;
+const ease = (p) => (p < 0.5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2);
+const walkEase = (p) => 0.4 * p + 0.6 * ease(p);
+const backOut = (p) => { const c = 1.70158; return 1 + (c + 1) * Math.pow(p - 1, 3) + c * Math.pow(p - 1, 2); };
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+function hash(s) { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; }
+function rng(seed) { return () => { seed |= 0; seed = (seed + 0x6D2B79F5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+function mix(hex, to, t) {
+  const a = parseInt(hex.slice(1), 16), b = parseInt(to.slice(1), 16);
+  const c = (s) => Math.round(lerp((a >> s) & 255, (b >> s) & 255, t));
+  return `rgb(${c(16)},${c(8)},${c(0)})`;
+}
+
+const cv = document.getElementById('cv');
+const ctx = cv.getContext('2d');
+const stageEl = document.getElementById('stage');
+const statEl = document.getElementById('stat');
+const stCv = document.createElement('canvas');
+const stCtx = stCv.getContext('2d');
+
+const S = { rooms: [], floors: [LOBBY], agents: new Map(), slots: new Map(), Hf: 100, scale: 1, dpr: 1, t: 0, dt: 0.05, dim: 0, sig: '', tasks: [], worldH: 0, vid: 0 };
+const E = { fy: 0, open: 0, moving: false, queue: [], rider: null, use: new Map() };
+
+const fIdx = (id) => { const i = S.floors.indexOf(id); return i < 0 ? S.floors.length - 1 : i; };
+const floorTop = (i) => ROOF + i * S.Hf;
+const footYf = (f) => ROOF + (f + 1) * S.Hf - 4;
+const footY = (i) => footYf(i);
+const slotX = (i) => X0 + i * STEP;
+const cabH = () => Math.min(58, S.Hf - 26);
+const cabFoot = () => footYf(E.fy);
+const yOf = (a) => (a.inCab ? cabFoot() : footY(fIdx(a.fr)));
+
+function spawn(gen) { const task = { gen, done: false }; S.tasks.push(task); gen.next(); return task; }
+function* tween(d, fn) { let t = 0; while (t < d) { t += yield; fn(Math.min(1, t / d)); } fn(1); }
+function* wait(s) { let t = 0; while (t < s) t += yield; }
+function* until(cond) { while (!cond()) yield; }
+
+function newAgent(d) {
+  return { id: d.id, name: d.name, state: d.state, sleepy: !!d.sleepy, title: d.title, room: d.room, fr: d.room, slot: -1, x: 0, sit: 1, sq: 0, facing: 1, look: 1, phase: 0, walking: false, away: false, inCab: false, alpha: 1, bubble: null, gone: false, visitor: false, seed: hash(d.id), tone: hash(d.id) % TONES.length, hx: [14, 14], hy: [-24, -24] };
+}
+
+function applyState(s) {
+  const present = new Set();
+  for (const d of s.agents) {
+    present.add(d.id);
+    let a = S.agents.get(d.id);
+    if (!a) { a = newAgent(d); S.agents.set(a.id, a); }
+    a.name = d.name; a.state = d.state; a.sleepy = !!d.sleepy; a.title = d.title; a.gone = false;
+    if (a.room !== d.room) { a.room = d.room; if (!a.away) a.fr = d.room; }
+  }
+  for (const [id, a] of [...S.agents]) {
+    if (a.visitor || present.has(id)) continue;
+    if (a.away) a.gone = true; else S.agents.delete(id);
+  }
+  S.rooms = s.rooms.map((r) => ({ id: r.id, label: r.label }));
+  const roomIds = new Set(S.rooms.map((r) => r.id));
+  const slots = new Map();
+  for (const r of S.rooms) {
+    const prev = (S.slots.get(r.id) || []).map((id) => { const a = S.agents.get(id); return a && !a.gone && a.room === r.id ? id : null; });
+    const arr = prev.slice();
+    for (const d of s.agents) {
+      if (d.room !== r.id || arr.includes(d.id)) continue;
+      const free = arr.indexOf(null);
+      if (free >= 0) arr[free] = d.id; else if (arr.length < MAXS) arr.push(d.id);
+    }
+    while (arr.length && arr[arr.length - 1] === null) arr.pop();
+    slots.set(r.id, arr);
+  }
+  S.slots = slots;
+  for (const a of S.agents.values()) {
+    if (a.visitor) continue;
+    const arr = slots.get(a.room);
+    a.slot = arr ? arr.indexOf(a.id) : -1;
+    if (a.slot < 0 && !a.away) S.agents.delete(a.id);
+  }
+  S.floors = [...S.rooms.map((r) => r.id), LOBBY];
+  for (const a of S.agents.values()) if (!roomIds.has(a.fr) && a.fr !== LOBBY && !a.away) a.fr = a.room;
+  for (const a of S.agents.values()) {
+    if (a.away || a.visitor || a.slot < 0) continue;
+    a.fr = a.room; a.x = slotX(a.slot); a.sit = 1; a.facing = 1; a.sq = 0; a.walking = false;
+  }
+  E.fy = clamp(E.fy, 0, S.floors.length - 1);
+  const list = [...S.agents.values()].filter((a) => !a.visitor);
+  const c = { working: 0, waiting: 0, idle: 0 };
+  for (const a of list) c[a.state]++;
+  statEl.innerHTML = `<b>${c.working}</b> working &middot; <b>${c.waiting}</b> waiting &middot; <b>${c.idle}</b> idle &middot; <i>${DEMO ? 'demo' : 'live'}</i>`;
+  const sig = S.rooms.map((r) => r.id + r.label + (slots.get(r.id) || []).map((id) => { const a = id && S.agents.get(id); return a ? a.name + (a.title || '') : '-'; }).join(',')).join('|') + ':' + c.working;
+  const changed = sig !== S.sig;
+  S.sig = sig;
+  S.working = c.working + c.waiting;
+  S.total = list.length;
+  if (changed || !S.ready) layout();
+}
+
+function layout() {
+  const n1 = S.floors.length;
+  const cw = stageEl.clientWidth, ch = stageEl.clientHeight - 2;
+  let s = Math.max(cw, 1) / WW;
+  s = Math.min(s, ch / (ROOF + GROUND + n1 * HF_MIN));
+  s = Math.max(s, MIN_SCALE);
+  s = Math.min(s, 2.6);
+  S.scale = s;
+  S.Hf = clamp(Math.floor((ch / s - ROOF - GROUND) / n1), HF_MIN, HF_MAX);
+  S.worldH = ROOF + n1 * S.Hf + GROUND;
+  S.dpr = window.devicePixelRatio || 1;
+  const cssW = WW * s, cssH = S.worldH * s;
+  cv.style.width = cssW + 'px'; cv.style.height = cssH + 'px';
+  cv.width = Math.round(cssW * S.dpr); cv.height = Math.round(cssH * S.dpr);
+  stCv.width = cv.width; stCv.height = cv.height;
+  drawStatic();
+  S.ready = true;
+}
+
+function rr(c, x, y, w, h, r) { c.beginPath(); c.roundRect(x, y, w, h, r); }
+
+function drawStatic() {
+  const c = stCtx, Hf = S.Hf, n1 = S.floors.length;
+  c.setTransform(1, 0, 0, 1, 0, 0);
+  c.clearRect(0, 0, stCv.width, stCv.height);
+  c.setTransform(S.dpr * (stCv.width / S.dpr / WW), 0, 0, S.dpr * (stCv.height / S.dpr / S.worldH), 0, 0);
+  const bTop = ROOF, bBot = ROOF + n1 * Hf;
+  c.fillStyle = '#171a1e'; c.fillRect(0, bBot, WW, GROUND);
+  c.save();
+  c.shadowColor = 'rgba(0,0,0,.5)'; c.shadowBlur = 22; c.shadowOffsetY = 8;
+  c.fillStyle = '#23272d'; c.fillRect(20, bTop, 720, n1 * Hf);
+  c.restore();
+  c.fillStyle = '#323840'; rr(c, 14, bTop - 7, 732, 8, 3); c.fill();
+  c.fillStyle = '#2c3138'; rr(c, EX - 30, bTop - 22, 60, 16, 3); c.fill();
+  c.fillStyle = '#3a4048'; c.fillRect(EX - 20, bTop - 18, 40, 2);
+  c.fillStyle = '#5a626c'; c.fillRect(EX + 40, bTop - 20, 1.5, 14); c.fillRect(EX + 36, bTop - 20, 9, 1.5);
+  const ch = cabH();
+  S.floors.forEach((id, i) => {
+    const top = floorTop(i), fy = footY(i);
+    c.fillStyle = i % 2 ? '#22262c' : '#262a31'; c.fillRect(20, top, 720, Hf);
+    c.fillStyle = '#1b1e23'; c.fillRect(20, top, LEFT - 20, Hf);
+    c.fillStyle = '#12151a'; c.fillRect(LEFT - 1, top, 1.5, Hf);
+    c.fillStyle = '#394048'; c.fillRect(20, fy, 720, 4);
+    c.fillStyle = '#2f353c'; c.fillRect(20, top, 720, 1.5);
+    c.fillStyle = '#16191d'; c.fillRect(648, top, 72, Hf);
+    c.fillStyle = '#2a3037'; c.fillRect(EX - 22, fy - ch, 1.5, ch); c.fillRect(EX + 20.5, fy - ch, 1.5, ch); c.fillRect(EX - 22, fy - ch - 1.5, 44, 1.5);
+    c.fillStyle = '#394048'; c.beginPath(); c.arc(EX, fy - ch - 9, 2.6, 0, 7); c.fill();
+    const label = id === LOBBY ? 'Lobby' : (S.rooms.find((r) => r.id === id) || {}).label || '';
+    c.fillStyle = '#d4d8de'; c.font = `600 11px ${FONT}`; c.textBaseline = 'alphabetic';
+    c.fillText(fit(c, label, LABEL_W), 28, top + 24);
+    if (id === LOBBY) {
+      c.strokeStyle = '#4a525c'; c.lineWidth = 1.5; c.strokeRect(22, fy - 52, 20, 52);
+      c.fillStyle = '#12151a'; c.fillRect(23, fy - 51, 18, 51);
+      for (const px of [300, 420]) plant(c, px, fy);
+      return;
+    }
+    const arr = S.slots.get(id) || [];
+    const cnt = arr.filter(Boolean).length;
+    c.fillStyle = '#7a828c'; c.font = `9px ${FONT}`; c.fillText(cnt + (cnt === 1 ? ' agent' : ' agents'), 28, top + 38);
+    for (let k = 0; k < Math.max(arr.length, 1); k++) {
+      const x = slotX(k);
+      c.fillStyle = '#383f47'; rr(c, x - 6, top + 5, 40, 3, 1.5); c.fill();
+      c.fillStyle = 'rgba(255,244,220,.10)'; rr(c, x - 4, top + 5, 36, 3, 1.5); c.fill();
+    }
+    arr.forEach((aid, k) => {
+      const a = aid && S.agents.get(aid);
+      if (!a) return;
+      desk(c, slotX(k), fy, a);
+    });
+    const empty = arr.length < MAXS ? arr.length : -1;
+    if (empty >= 0) plant(c, slotX(empty) + 20, fy);
+  });
+  c.fillStyle = '#12151a'; c.fillRect(20, bBot - 1, 720, 1);
+}
+
+function fit(c, text, w) {
+  if (c.measureText(text).width <= w) return text;
+  let t = text;
+  while (t.length > 1 && c.measureText(t + '…').width > w) t = t.slice(0, -1);
+  return t + '…';
+}
+
+function plant(c, x, fy) {
+  c.fillStyle = '#4a525c'; c.beginPath(); c.moveTo(x - 7, fy - 12); c.lineTo(x + 7, fy - 12); c.lineTo(x + 5, fy); c.lineTo(x - 5, fy); c.closePath(); c.fill();
+  c.fillStyle = '#6f7a73';
+  for (const [dx, dy, r] of [[-5, -22, 6], [4, -26, 7], [0, -17, 6], [8, -18, 5]]) { c.beginPath(); c.ellipse(x + dx, fy + dy, r * 0.7, r, dx * 0.08, 0, 7); c.fill(); }
+}
+
+function desk(c, x, fy, a) {
+  c.fillStyle = '#4a525c'; rr(c, x - 12, fy - 34, 3, 20, 1); c.fill();
+  c.fillStyle = '#59616b'; rr(c, x - 11, fy - 15, 17, 3.5, 1.5); c.fill();
+  c.fillStyle = '#3a4048'; c.fillRect(x - 3, fy - 12, 2, 9); c.fillRect(x - 9, fy - 3, 14, 2);
+  c.save();
+  c.shadowColor = 'rgba(0,0,0,.35)'; c.shadowBlur = 5; c.shadowOffsetY = 2;
+  c.fillStyle = '#434a53'; c.fillRect(x + 15, fy - 20, 57, 20);
+  c.restore();
+  c.fillStyle = '#5b636d'; rr(c, x + 10, fy - 24, 62, 4.5, 1.5); c.fill();
+  c.fillStyle = '#2a2f35'; rr(c, x + 14, fy - 26, 20, 2.5, 1); c.fill();
+  c.fillStyle = '#4a525c'; c.fillRect(x + 50, fy - 33, 4, 9); c.fillRect(x + 45, fy - 26.5, 14, 2.5);
+  c.fillStyle = '#2f353c'; rr(c, x + 39, fy - 53, 26, 20, 3); c.fill();
+  c.fillStyle = '#0f1114'; rr(c, x + 41, fy - 51, 22, 16, 1.5); c.fill();
+  c.fillStyle = '#aab1ba'; c.font = `700 8px ${FONT}`; c.textAlign = 'center'; c.textBaseline = 'middle';
+  c.fillText(fit(c, a.name, 52), x + 43.5, fy - 9.5);
+  c.textAlign = 'left'; c.textBaseline = 'alphabetic';
+}
+
+function pose(a) {
+  const idleSeated = a.state === 'idle' && !a.away && a.sit > 0.99;
+  return { idleSeated };
+}
+
+function drawAgent(a, t) {
+  const y = yOf(a), sit = a.sit, dtk = Math.min(1, S.dt * 14);
+  ctx.save();
+  ctx.globalAlpha = a.alpha;
+  ctx.fillStyle = 'rgba(0,0,0,.28)'; ctx.beginPath(); ctx.ellipse(a.x + sit * 4 * a.facing, y, 12, 2.6, 0, 0, 7); ctx.fill();
+  ctx.translate(a.x, y);
+  ctx.scale(a.facing * (1 - 0.6 * a.sq), 1 + a.sq);
+  const tone = TONES[a.tone], dark = mix(tone, '#000000', 0.35), head = mix(tone, '#ffffff', 0.3);
+  const hipY = -8 - 6 * sit;
+  const working = a.state === 'working' && !a.away && sit > 0.9;
+  const { idleSeated } = pose(a);
+  const stretch = idleSeated && ((t + a.seed % 13 * 1.7) % 24) > 22.4;
+  const breath = a.walking ? 0 : Math.sin(t * 1.7 + a.seed % 7);
+  const bob = a.walking ? -Math.abs(Math.sin(a.phase)) * 1.4 : breath * 0.6;
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  for (const k of [1, 0]) {
+    const sw = a.walking ? Math.sin(a.phase + k * Math.PI) * 5 : 0;
+    const lift = a.walking ? Math.max(0, Math.cos(a.phase + k * Math.PI)) * 2.2 : 0;
+    const fx = lerp(sw, 11 + k * 1.2, sit), fy = lerp(-lift, 0, sit);
+    const kx = lerp(sw / 2 + (a.walking ? 1.5 : 0), 11 + k * 1.2, sit), ky = lerp((hipY - lift) / 2, hipY, sit);
+    ctx.strokeStyle = k ? dark : mix(tone, '#000000', 0.2); ctx.lineWidth = 4.6;
+    ctx.beginPath(); ctx.moveTo(0, hipY); ctx.lineTo(kx, ky); ctx.lineTo(fx, fy); ctx.stroke();
+  }
+  ctx.translate(0, bob);
+  const armAt = (k) => {
+    const sx = 1, sy = hipY - 17;
+    let tx, ty;
+    if (stretch) { tx = 3 + k * 3; ty = sy - 17; }
+    else if (sit > 0.9) {
+      if (working) { tx = 15 + k * 6; ty = -26 - bob + 1.8 * Math.sin(t * 15 + k * 2.4); }
+      else { tx = 11 + k * 3; ty = -20 - bob; }
+    } else if (a.walking) { tx = 2 + Math.sin(a.phase + (1 - k) * Math.PI) * 6.5; ty = sy + 12; }
+    else { tx = 3; ty = sy + 12; }
+    a.hx[k] += (tx - a.hx[k]) * dtk; a.hy[k] += (ty - a.hy[k]) * dtk;
+    const hx = a.hx[k], hy = a.hy[k];
+    ctx.strokeStyle = k ? dark : mix(tone, '#000000', 0.15); ctx.lineWidth = 3.6;
+    ctx.beginPath(); ctx.moveTo(sx, sy); ctx.quadraticCurveTo((sx + hx) / 2 - 2, (sy + hy) / 2 + 4.5, hx, hy); ctx.stroke();
+  };
+  armAt(1);
+  ctx.fillStyle = tone; rr(ctx, -8, hipY - 24, 16, 24, 8); ctx.fill();
+  if (working) { ctx.fillStyle = ACC; ctx.beginPath(); ctx.arc(2, hipY - 8, 1.9, 0, 7); ctx.fill(); }
+  ctx.fillStyle = head; ctx.beginPath(); ctx.arc(1, hipY - 30, 8.6, 0, 7); ctx.fill();
+  const blink = ((t + a.seed % 97 * 0.043) % 4.4) < 0.13 || (stretch);
+  const ex = a.look < 0 ? -2.8 : 4.6;
+  ctx.fillStyle = '#15181c'; ctx.beginPath(); ctx.ellipse(1 + ex, hipY - 31, 1.5, blink ? 0.3 : 1.6, 0, 0, 7); ctx.fill();
+  armAt(0);
+  ctx.restore();
+  const hy = y - (sit > 0.5 ? 71 : 70);
+  if (a.state === 'waiting' && !a.away && sit > 0.9) {
+    ctx.save();
+    ctx.fillStyle = '#2d3238'; ctx.strokeStyle = ACC; ctx.lineWidth = 1;
+    rr(ctx, a.x - 6, hy, 27, 13, 6.5); ctx.fill(); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(a.x + 1, hy + 13); ctx.lineTo(a.x + 3, hy + 17); ctx.lineTo(a.x + 6, hy + 13); ctx.fillStyle = '#2d3238'; ctx.fill();
+    for (let i = 0; i < 3; i++) { ctx.fillStyle = ACC; ctx.globalAlpha = 0.35 + 0.65 * Math.max(0, Math.sin(t * 3.2 - i * 0.9)); ctx.beginPath(); ctx.arc(a.x + 2 + i * 6.5, hy + 6.5, 1.7, 0, 7); ctx.fill(); }
+    ctx.restore();
+  }
+  if (a.sleepy && a.state === 'idle' && !a.away && sit > 0.9) {
+    ctx.save(); ctx.fillStyle = '#9aa2ac'; ctx.textAlign = 'center';
+    for (let j = 0; j < 2; j++) {
+      const p = (t * 0.3 + j * 0.5) % 1;
+      ctx.globalAlpha = Math.sin(Math.PI * p) * 0.9; ctx.font = `700 ${8 + j * 3}px ${FONT}`;
+      ctx.fillText('z', a.x + 8 + p * 9, y - 50 - p * 16);
+    }
+    ctx.restore();
+  }
+}
+
+function bubbleRect(a) {
+  ctx.font = `600 10px ${FONT}`;
+  const w = Math.ceil(ctx.measureText(a.bubble.text).width) + 16, h = 18;
+  const y = yOf(a) - 52 - 7 - h;
+  const x = clamp(a.x - w / 2, LEFT + 2, WALL_R - w);
+  return { x, y, w, h, tipX: clamp(a.x, x + 8, x + w - 8), tipY: y + h + 6 };
+}
+
+function drawBubble(a, t) {
+  const b = a.bubble, age = S.t - b.t0;
+  let sc = age < 0.3 ? backOut(age / 0.3) : 1;
+  if (age > b.dur - 0.2) sc = Math.max(0, (b.dur - age) / 0.2);
+  if (sc <= 0.01) return;
+  const r = bubbleRect(a);
+  ctx.save();
+  ctx.translate(r.tipX, r.tipY); ctx.scale(sc, sc); ctx.translate(-r.tipX, -r.tipY);
+  ctx.shadowColor = 'rgba(0,0,0,.4)'; ctx.shadowBlur = 6; ctx.shadowOffsetY = 2;
+  ctx.fillStyle = ACC; rr(ctx, r.x, r.y, r.w, r.h, 9); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(r.tipX - 4, r.y + r.h - 1); ctx.lineTo(r.tipX, r.tipY); ctx.lineTo(r.tipX + 4, r.y + r.h - 1); ctx.fill();
+  ctx.shadowColor = 'transparent';
+  ctx.fillStyle = '#1b1307'; ctx.font = `600 10px ${FONT}`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(b.text, r.x + r.w / 2, r.y + r.h / 2 + 0.5);
+  ctx.restore();
+}
+
+function drawScreens(t) {
+  for (const [rid, arr] of S.slots) {
+    const f = S.floors.indexOf(rid);
+    if (f < 0) continue;
+    const fy = footY(f);
+    arr.forEach((aid, k) => {
+      const a = aid && S.agents.get(aid);
+      if (!a) return;
+      const x = slotX(k) + 41, y = fy - 51;
+      let glow = 0.1;
+      if (!a.away) glow = a.state === 'working' ? 0.62 + 0.3 * Math.sin(t * 3 + a.seed % 9) : a.state === 'waiting' ? 0.32 : 0.1;
+      ctx.fillStyle = ACC;
+      if (glow > 0.3) {
+        ctx.globalAlpha = 0.05 * glow; rr(ctx, x - 7, y - 6, 36, 28, 8); ctx.fill();
+        ctx.globalAlpha = 0.09 * glow; rr(ctx, x - 3, y - 3, 28, 22, 5); ctx.fill();
+      }
+      ctx.globalAlpha = glow; rr(ctx, x, y, 22, 16, 1.5); ctx.fill();
+      if (!a.away && a.state === 'working') {
+        ctx.globalAlpha = 0.55; ctx.fillStyle = '#2a1a08';
+        const q = Math.floor(t * 2.2 + a.seed % 5);
+        for (let i = 0; i < 4; i++) ctx.fillRect(x + 3, y + 2.5 + i * 3.2, 5 + ((q * 7 + i * 5 + a.seed) % 11), 1.4);
+      }
+      ctx.globalAlpha = 1;
+    });
+  }
+}
+
+function drawCab(t) {
+  const ch = cabH(), top = cabFoot() - ch, x = EX - 20;
+  ctx.fillStyle = '#4a525c'; ctx.fillRect(EX - 0.5, ROOF - 6, 1.2, Math.max(0, top - ROOF + 6));
+  S.floors.forEach((id, i) => {
+    const on = Math.abs(E.fy - i) < 0.05;
+    ctx.fillStyle = on ? ACC : '#394048'; ctx.beginPath(); ctx.arc(EX, footY(i) - ch - 9, 2.6, 0, 7); ctx.fill();
+  });
+  ctx.save();
+  ctx.shadowColor = 'rgba(0,0,0,.5)'; ctx.shadowBlur = 8; ctx.shadowOffsetY = 3;
+  ctx.fillStyle = '#3d444d'; rr(ctx, x - 2, top - 3, 44, ch + 3, 3); ctx.fill();
+  ctx.restore();
+  ctx.fillStyle = '#1c2025'; ctx.fillRect(x, top, 40, ch);
+  ctx.fillStyle = E.moving || E.open > 0.05 ? ACC : '#59616b'; rr(ctx, EX - 5, top - 2, 10, 2.4, 1.2); ctx.fill();
+  ctx.save();
+  ctx.beginPath(); ctx.rect(x, top, 40, ch); ctx.clip();
+  if (E.rider) drawAgent(E.rider, t);
+  ctx.restore();
+  const o = E.open * 19;
+  ctx.fillStyle = 'rgba(88,96,106,.62)';
+  ctx.save(); ctx.beginPath(); ctx.rect(x, top, 40, ch); ctx.clip();
+  ctx.fillRect(x - o, top, 20, ch); ctx.fillRect(x + 20 + o, top, 20, ch);
+  ctx.fillStyle = 'rgba(0,0,0,.25)'; ctx.fillRect(x - o + 19, top, 1, ch); ctx.fillRect(x + 20 + o, top, 1, ch);
+  ctx.restore();
+}
+
+function draw(t) {
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, cv.width, cv.height);
+  ctx.drawImage(stCv, 0, 0);
+  ctx.setTransform(cv.width / WW, 0, 0, cv.height / S.worldH, 0, 0);
+  ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+  const target = NIGHT || (S.total > 0 && S.working / S.total <= 0.1) ? 1 : 0;
+  S.dim += (target - S.dim) * Math.min(1, S.dt * 0.8);
+  if (S.dim > 0.01) { ctx.fillStyle = `rgba(4,6,10,${0.26 * S.dim})`; ctx.fillRect(20, ROOF, 720, S.floors.length * S.Hf); }
+  drawScreens(t);
+  const all = [...S.agents.values()];
+  for (const a of all) if (!a.away) drawAgent(a, t);
+  drawCab(t);
+  for (const a of all) if (a.away && !a.inCab) drawAgent(a, t);
+  for (const a of all) if (a.bubble) drawBubble(a, t);
+}
+
+function* walkTo(a, tx) {
+  const x0 = a.x, dist = Math.abs(tx - x0);
+  if (dist < 0.5) { a.x = tx; return; }
+  a.facing = tx > x0 ? 1 : -1; a.walking = true;
+  const dur = clamp(dist / 115, 0.3, 4);
+  let last = x0;
+  yield* tween(dur, (p) => { const x = lerp(x0, tx, walkEase(p)); a.phase += Math.abs(x - last) * 0.3; last = x; a.x = x; });
+  a.x = tx; a.walking = false;
+}
+
+function* stand(a) {
+  yield* tween(0.5, (p) => {
+    a.sit = 1 - ease(p);
+    a.sq = p < 0.4 ? -0.1 * Math.sin((p / 0.4) * Math.PI) : 0.09 * Math.sin(((p - 0.4) / 0.6) * Math.PI);
+  });
+  a.sit = 0; a.sq = 0;
+}
+
+function* sitDown(a) {
+  a.facing = 1;
+  yield* tween(0.5, (p) => {
+    a.sit = ease(p);
+    a.sq = p < 0.6 ? 0.06 * Math.sin((p / 0.6) * Math.PI) : -0.1 * Math.sin(((p - 0.6) / 0.4) * Math.PI);
+  });
+  a.sit = 1; a.sq = 0;
+}
+
+function* moveCab(to) {
+  const from = E.fy;
+  if (Math.abs(from - to) < 0.001) return;
+  E.moving = true;
+  yield* tween(0.5 + 0.38 * Math.abs(to - from), (p) => { E.fy = lerp(from, to, ease(p)); });
+  E.fy = to; E.moving = false;
+}
+function* doors(to) { const f = E.open; yield* tween(0.3, (p) => { E.open = lerp(f, to, ease(p)); }); E.open = to; }
+
+function* elevatorProc() {
+  for (;;) {
+    if (!E.queue.length) { yield; continue; }
+    const r = E.queue[0];
+    yield* moveCab(r.from);
+    yield* doors(1);
+    r.state = 'board';
+    while (r.state !== 'in') yield;
+    E.queue.shift(); E.rider = r.a;
+    yield* wait(0.15);
+    yield* doors(0);
+    yield* moveCab(clamp(r.to, 0, S.floors.length - 1));
+    yield* doors(1);
+    r.state = 'exit';
+    while (r.state !== 'out') yield;
+    E.rider = null;
+    yield* wait(0.3);
+    yield* doors(0);
+  }
+}
+
+function* ride(a, toRoom) {
+  const from = fIdx(a.fr), to = fIdx(toRoom);
+  const r = { a, from, to, state: 'wait' };
+  E.queue.push(r);
+  yield* until(() => r.state === 'board');
+  E.use.set(from, Math.max(0, (E.use.get(from) || 1) - 1));
+  yield* walkTo(a, EX);
+  a.facing = 1; a.inCab = true; r.state = 'in';
+  yield* until(() => r.state === 'exit');
+  a.inCab = false; a.fr = S.floors[clamp(to, 0, S.floors.length - 1)]; r.state = 'out';
+}
+
+function* goTo(a, room, x) {
+  if (a.fr !== room) {
+    const f0 = fIdx(a.fr), k = E.use.get(f0) || 0;
+    E.use.set(f0, k + 1);
+    yield* walkTo(a, EX - 46 - 20 * k);
+    yield* ride(a, room);
+  }
+  yield* walkTo(a, x);
+}
+
+function* trip(a, bid, text) {
+  a.away = true;
+  const home = () => (a.visitor ? { room: LOBBY, x: 30 } : { room: a.room, x: slotX(Math.max(0, a.slot)) });
+  if (a.visitor) { a.fr = LOBBY; a.x = 30; a.sit = 0; a.facing = 1; yield* tween(0.4, (p) => { a.alpha = p; }); }
+  else yield* stand(a);
+  const b = S.agents.get(bid);
+  if (b && !b.gone && b.slot >= 0) {
+    yield* goTo(a, b.room, slotX(b.slot) - 28);
+    a.facing = 1;
+    yield* wait(0.2);
+    a.bubble = { text, t0: S.t, dur: 2.2 }; b.look = -1;
+    yield* wait(2.3);
+    a.bubble = null; b.look = 1;
+    yield* wait(0.15);
+  }
+  const h = home();
+  yield* goTo(a, h.room, h.x);
+  if (a.visitor) { yield* tween(0.4, (p) => { a.alpha = 1 - p; }); S.agents.delete(a.id); return; }
+  yield* sitDown(a);
+  a.away = false; a.fr = a.room; a.x = slotX(Math.max(0, a.slot)); a.sit = 1; a.sq = 0; a.facing = 1; a.walking = false;
+  if (a.gone) S.agents.delete(a.id);
+}
+
+function startTrip(fromId, toId, text) {
+  const target = S.agents.get(toId);
+  if (!target || target.gone || target.slot < 0) return false;
+  let a = S.agents.get(fromId);
+  if (!a || a.gone) {
+    a = newAgent({ id: 'v' + (++S.vid), name: 'Guest', state: 'idle', room: LOBBY });
+    a.visitor = true; a.slot = -1; a.alpha = 0; a.fr = LOBBY; a.x = 30; a.sit = 0;
+    S.agents.set(a.id, a);
+  } else if (a.away || a.slot < 0) return false;
+  spawn(trip(a, toId, text));
+  return true;
+}
+
+const seen = new Set();
+let firstLoad = true;
+function handleEvents(s) {
+  const now = s.generatedAt || Date.now();
+  for (const e of s.events || []) {
+    if (seen.has(e.id)) continue;
+    seen.add(e.id);
+    if (firstLoad && now - e.at > 8000) continue;
+    if (now - e.at > 20000) continue;
+    startTrip(e.from, e.to, TEXTS[hash(e.id) % TEXTS.length]);
+  }
+  if (seen.size > 500) { const keep = [...seen].slice(-200); seen.clear(); keep.forEach((k) => seen.add(k)); }
+  firstLoad = false;
+}
+
+async function poll() {
+  if (document.hidden) return;
+  try {
+    const r = await fetch('state.json', { cache: 'no-store' });
+    const s = await r.json();
+    applyState(s); handleEvents(s);
+  } catch {
+    statEl.innerHTML = 'offline &middot; run <b>node scan.mjs</b> or add <i>?demo=1</i>';
+  }
+}
+
+function startDemo() {
+  const seed = Number(Q.get('seed')) || 7;
+  const R = rng(seed);
+  const rooms = [{ id: 'dashboard', label: 'dashboard' }, { id: 'gateway', label: 'gateway' }, { id: 'infra', label: 'infra' }, { id: 'docs', label: 'docs' }];
+  const who = [['Fern', 'gateway', 'working'], ['Moss', 'gateway', 'idle'], ['Juniper', 'gateway', 'waiting'], ['Pebble', 'dashboard', 'working'], ['Sage', 'dashboard', 'working'], ['Wren', 'dashboard', 'idle'], ['Basil', 'docs', 'idle'], ['Cedar', 'docs', 'working'], ['Clover', 'infra', 'waiting'], ['Ash', 'infra', 'idle']];
+  const agents = who.map(([name, room, state]) => ({ id: 'd_' + name.toLowerCase(), name, room, state, sleepy: name === 'Basil' }));
+  const push = () => applyState({ rooms, agents, events: [] });
+  push();
+  const pick = (arr) => arr[Math.floor(R() * arr.length)];
+  let night = false;
+  spawn((function* () {
+    for (;;) {
+      yield* wait(2.2 + R() * 2.8);
+      if (night) continue;
+      const a = pick(agents);
+      const working = agents.filter((x) => x.state === 'working').length;
+      if (a.state === 'working') a.state = R() < 0.35 && working > 2 ? 'waiting' : 'idle';
+      else a.state = 'working';
+      if (a.state !== 'idle') a.sleepy = false; else a.sleepy = R() < 0.3;
+      push();
+    }
+  })());
+  spawn((function* () {
+    yield* wait(1.2);
+    for (;;) {
+      const free = agents.filter((x) => { const o = S.agents.get(x.id); return o && !o.away; });
+      if (free.length > 1 && !night && agents.length - free.length < 3) {
+        const from = pick(free);
+        const others = agents.filter((x) => x !== from);
+        const far = others.filter((x) => x.room !== from.room);
+        const to = R() < 0.75 ? pick(far) : pick(others);
+        startTrip(from.id, to.id, pick(TEXTS));
+      }
+      yield* wait(3 + R() * 2.5);
+    }
+  })());
+  spawn((function* () {
+    for (;;) {
+      yield* wait(75);
+      night = true;
+      for (const a of agents) { a.state = 'idle'; a.sleepy = R() < 0.5; }
+      push();
+      yield* wait(16);
+      night = false;
+      for (const a of agents) if (R() < 0.6) { a.state = 'working'; a.sleepy = false; }
+      push();
+    }
+  })());
+}
+
+function step(dt) {
+  S.dt = dt; S.t += dt;
+  for (const task of [...S.tasks]) {
+    const r = task.gen.next(dt);
+    if (r.done) S.tasks.splice(S.tasks.indexOf(task), 1);
+  }
+}
+
+let raf = 0, last = 0;
+function frame(now) {
+  raf = requestAnimationFrame(frame);
+  const moving = [...S.agents.values()].some((a) => a.away);
+  const every = moving ? 1000 / 20 : 1000 / 15;
+  if (now - last < every - 3) return;
+  const dt = Math.min(0.1, (now - last) / 1000) * SPEED;
+  last = now;
+  S.frames = (S.frames || 0) + 1;
+  step(dt);
+  draw(S.t);
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) { cancelAnimationFrame(raf); raf = 0; }
+  else if (!raf) { last = performance.now(); raf = requestAnimationFrame(frame); if (!DEMO) poll(); }
+});
+let rz = 0;
+window.addEventListener('resize', () => { clearTimeout(rz); rz = setTimeout(layout, 100); });
+
+spawn(elevatorProc());
+if (DEMO) startDemo();
+else if (location.protocol.startsWith('http')) { poll(); setInterval(poll, 2500); }
+else { statEl.innerHTML = 'open via <b>node scan.mjs</b> or add <i>?demo=1</i>'; applyState({ rooms: [], agents: [], events: [] }); }
+if (!S.ready) layout();
+raf = requestAnimationFrame(frame);
+
+window.__office = {
+  scale: () => S.scale, hf: () => S.Hf, dpr: () => S.dpr, frames: () => S.frames || 0, world: () => ({ w: WW, h: S.worldH }),
+  floors: () => S.floors.map((id, i) => ({ id, top: floorTop(i), foot: footY(i) })),
+  labels: () => S.floors.map((id, i) => { stCtx.font = `600 11px ${FONT}`; const l = id === LOBBY ? 'Lobby' : (S.rooms.find((r) => r.id === id) || {}).label || ''; const w = stCtx.measureText(fit(stCtx, l, LABEL_W)).width; return { id, x: 28, y: floorTop(i) + 12, w, h: 14 }; }),
+  desks: () => { const o = []; for (const [rid, arr] of S.slots) arr.forEach((aid, k) => { if (aid) o.push({ id: aid, room: rid, x: slotX(k), y: footY(fIdx(rid)) }); }); return o; },
+  agents: () => [...S.agents.values()].map((a) => ({ id: a.id, name: a.name, state: a.state, room: a.room, fr: a.fr, x: a.x, y: yOf(a), sit: a.sit, away: a.away, inCab: a.inCab, visitor: a.visitor, bubble: a.bubble ? bubbleRect(a) : null })),
+  elevator: () => ({ fy: E.fy, open: E.open, queue: E.queue.length, rider: E.rider ? E.rider.id : null, x: EX, foot: cabFoot(), h: cabH() }),
+  trip: (fromId, toId, text) => startTrip(fromId, toId || '', text || TEXTS[0]),
+  dim: () => S.dim,
+};
+})();
+</script>
+</body>
+</html>
