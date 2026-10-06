@@ -269,7 +269,7 @@ const fIdx = (id) => {
   const i = fIdxN(id);
   if (!S.anim) return i;
   const f = S.anim.from.get(id);
-  return f === undefined ? i : lerp(f, i, S.anim.p);
+  return f === undefined ? i : lerp(f, i, S.anim.pf);
 };
 const floorTop = (i) => Math.round(T0() + i * S.Hf);
 const footY = (i) => floorTop(i) + S.Hf - FB;
@@ -280,7 +280,7 @@ const cellsFor = (rid) => Math.max(3, (S.slots.get(rid) || []).length);
 const pitchOf = (rid) => (zr() - zl()) / cellsFor(rid);
 const slotX = (rid, k) => Math.round(zl() + pitchOf(rid) * (k + 0.5) - 12);
 const cabH = () => Math.min(38, S.Hf - FB - 10);
-const cabFoot = () => T0() + (E.fy + 1) * S.Hf - FB;
+const cabFoot = () => T0() + ((S.anim && E.fid && !E.moving ? fIdx(E.fid) : E.fy) + 1) * S.Hf - FB;
 const bossX = () => Math.round(zl() + (zr() - zl()) * 0.26);
 const bossSpot = () => bossX() + 5 + BOSS_DESK_W + 10;
 const hallW = () => clamp(Math.floor((zr() - bossSpot() - 34) * 0.6), 100, 160);
@@ -312,6 +312,8 @@ function localView(raw) {
 
 function applyState(raw) {
   S.last = raw;
+  const oldRooms = S.rooms, oldSlots = S.slots, oldWall = S.wall, oldLH = S.LH;
+  const efid = E.moving ? null : S.floors[Math.round(E.fy)];
   const first = !S.gotState;
   S.gotState = true;
   const s = SERVER ? raw : localView(raw);
@@ -332,15 +334,19 @@ function applyState(raw) {
     a.name = d.name; a.state = d.state; a.sleepy = !!d.sleepy; a.gone = false; a.title = d.title || '';
     if (a.room !== d.room) { a.room = d.room; if (!a.away) a.fr = d.room; }
   }
+  const leavers = [];
   for (const [id, a] of [...S.agents]) {
-    if (a.visitor || present.has(id)) continue;
-    if (a.away) a.gone = true; else S.agents.delete(id);
+    if (a.visitor || present.has(id) || a.leaving) continue;
+    if (a.away) a.gone = true;
+    else if (S.ready && !first && a.slot >= 0 && !a.joining) { a.gone = true; a.leaving = true; leavers.push(a); }
+    else S.agents.delete(id);
   }
   S.rooms = s.rooms.map((r) => ({ id: r.id, label: r.label }));
+  for (const r of oldRooms) if (!S.rooms.some((x) => x.id === r.id) && [...S.agents.values()].some((a) => a.leaving && a.room === r.id)) S.rooms.splice(Math.min(oldRooms.indexOf(r), S.rooms.length), 0, { id: r.id, label: r.label });
   const roomIds = new Set(S.rooms.map((r) => r.id));
   const slots = new Map();
   for (const r of S.rooms) {
-    const prev = (S.slots.get(r.id) || []).map((id) => { const a = S.agents.get(id); return a && !a.gone && a.room === r.id ? id : null; });
+    const prev = (S.slots.get(r.id) || []).map((id) => { const a = S.agents.get(id); return a && (!a.gone || a.leaving) && a.room === r.id ? id : null; });
     const arr = prev.slice();
     for (const d of s.agents) {
       if (d.room !== r.id || arr.includes(d.id)) continue;
@@ -363,10 +369,13 @@ function applyState(raw) {
   const added = S.floors.filter((id) => !oldFloors.includes(id));
   const removed = oldFloors.filter((id) => !S.floors.includes(id));
   const moved = S.floors.some((id) => oldFloors.includes(id) && oldFloors.indexOf(id) !== S.floors.indexOf(id));
-  const reorder = S.ready && !first && removed.length === 0 && (added.length > 0 || moved);
+  const reorder = S.ready && !first && (added.length > 0 || removed.length > 0 || moved);
+  const ghosts = removed.map((id) => ({ id, i: oldFloors.indexOf(id), label: (oldRooms.find((r) => r.id === id) || {}).label || '', slots: (oldSlots.get(id) || []).map((x) => (x && S.agents.has(x) ? x : null)), wall: oldWall.get(id) }));
   for (const a of S.agents.values()) if (!roomIds.has(a.fr) && a.fr !== LOBBY && a.fr !== BOSS && !a.away) a.fr = a.room;
-  E.fy = clamp(E.fy, 0, S.floors.length - 1);
-  const list = [...S.agents.values()].filter((a) => !a.visitor);
+  const ei = S.floors.indexOf(efid);
+  E.fy = ei >= 0 ? ei : clamp(E.fy, 0, S.floors.length - 1);
+  E.fid = reorder && ei >= 0 && !E.moving ? efid : null;
+  const list = [...S.agents.values()].filter((a) => !a.visitor && !a.gone);
   const c = { working: 0, waiting: 0, idle: 0 };
   for (const a of list) c[a.state]++;
   S.counts = c;
@@ -378,8 +387,9 @@ function applyState(raw) {
   S.working = c.working + c.waiting;
   S.total = list.length;
   if (changed || !S.ready) layout(); else snapSeated();
-  if (reorder) beginAnim(oldFloors, added);
+  if (reorder) beginAnim(oldFloors, added, ghosts, oldLH);
   for (const a of joiners) spawn(joinTask(a));
+  leavers.forEach((a, k) => spawn(k < 3 ? leaveTask(a) : fadeTask(a)));
   UI.dirty = true;
   maybeStartTour();
 }
@@ -407,7 +417,7 @@ function measure() {
 }
 
 function layout() {
-  S.anim = null; S.fc = null; S.bgCv = null;
+  S.anim = null; S.fc = null; S.bgCv = null; E.fid = null;
   measure();
   cv.width = S.LW; cv.height = S.LH; stCv.width = S.LW; stCv.height = S.LH;
   cv.style.width = (S.LW * S.s / S.dpr) + 'px'; cv.style.height = (S.LH * S.s / S.dpr) + 'px';
@@ -587,8 +597,10 @@ function bossStation(c, fy) {
 }
 
 function assignWalls() {
-  const use = WALLS.map(() => 0), out = new Map();
-  for (const id of S.rooms.map((r) => r.id).sort()) {
+  const use = WALLS.map(() => 0), out = new Map(), ids = S.rooms.map((r) => r.id);
+  for (const id of ids) if (S.wall.has(id)) { out.set(id, S.wall.get(id)); use[S.wall.get(id)]++; }
+  for (const id of ids.slice().sort()) {
+    if (out.has(id)) continue;
     let k = hash(id) % WALLS.length, best = k;
     for (let n = 0; n < WALLS.length; n++) { const c = (k + n) % WALLS.length; if (use[c] < use[best]) best = c; }
     use[best]++;
@@ -756,9 +768,23 @@ function floorCanvas(i, id) {
   return f;
 }
 
-function beginAnim(old, added) {
+function ghostCanvas(g) {
+  const sr = S.rooms, ss = S.slots, sw = S.wall;
+  S.rooms = [...sr, { id: g.id, label: g.label }]; S.slots = new Map(ss).set(g.id, g.slots); S.wall = new Map(sw).set(g.id, g.wall);
+  try { return floorCanvas(g.i, g.id); } finally { S.rooms = sr; S.slots = ss; S.wall = sw; }
+}
+
+function setCanvasH(h) {
+  cv.height = h;
+  cv.style.height = (h * S.s / S.dpr) + 'px';
+  ctx.imageSmoothingEnabled = false;
+}
+
+function beginAnim(old, added, ghosts, oldLH) {
+  const keepH = Math.max(S.LH, oldLH || 0);
+  if (keepH > S.LH) setCanvasH(keepH);
   const bg = document.createElement('canvas');
-  bg.width = S.LW; bg.height = S.LH;
+  bg.width = S.LW; bg.height = keepH;
   const bc = bg.getContext('2d');
   bc.imageSmoothingEnabled = false;
   drawBg(bc);
@@ -767,7 +793,8 @@ function beginAnim(old, added) {
   S.fc = new Map(S.floors.map((id, i) => [id, floorCanvas(i, id)]));
   const slide = new Set((added || []).filter((id) => (S.slots.get(id) || []).every((aid) => !aid || (S.agents.get(aid) || {}).joining)));
   S.animCount = (S.animCount || 0) + 1;
-  S.anim = { t0: S.t, dur: 0.8, from: new Map(old.map((id, i) => [id, i])), p: 0, slide };
+  const out = (ghosts || []).map((g) => ({ i: g.i, cv: ghostCanvas(g) }));
+  S.anim = { t0: S.t, dur: out.length ? 0.9 : 0.8, from: new Map(old.map((id, i) => [id, i])), p: 0, pf: 0, ps: 0, slide, out, keepH };
 }
 
 function idleAct(a, t) {
@@ -845,11 +872,17 @@ function drawSeated(a, t, x, fy, st, o) {
 
 function drawAgent(a, t) {
   if (a.alpha <= 0.05) return;
+  const g = ctx.globalAlpha;
+  ctx.globalAlpha = g * a.alpha;
+  try { drawAgentBody(a, t); } finally { ctx.globalAlpha = g; }
+}
+
+function drawAgentBody(a, t) {
   const x = Math.round(a.x), fy = yOf(a), st = a.st;
   if (a.q && a.fr === BOSS && !a.walking && !a.inCab) { drawWaiter(a, t); return; }
   if (a.sit > 0.5) { drawSeated(a, t, x, fy, st, seatedPose(a, t)); return; }
   ctx.save();
-  ctx.globalAlpha = 0.25; ctx.fillStyle = '#000'; ctx.fillRect(x - 5, fy, 10, 1); ctx.globalAlpha = 1;
+  ctx.globalAlpha = 0.25 * a.alpha; ctx.fillStyle = '#000'; ctx.fillRect(x - 5, fy, 10, 1); ctx.globalAlpha = a.alpha;
   ctx.translate(x, 0); ctx.scale(a.facing, 1);
   const blink = ((t * 1000 + a.seed * 37) % 3600) < 160;
   let face = blink ? 'blink' : 'neutral';
@@ -1061,9 +1094,10 @@ function drawCab(t) {
 }
 
 function draw(t) {
-  ctx.clearRect(0, 0, S.LW, S.LH);
+  ctx.clearRect(0, 0, S.LW, cv.height);
   if (S.anim && S.bgCv) {
     ctx.drawImage(S.bgCv, 0, 0);
+    for (const g of S.anim.out) ctx.drawImage(g.cv, -Math.round(S.anim.ps * S.LW), floorTop(g.i));
     for (const [id, f] of S.fc) ctx.drawImage(f, S.anim.slide.has(id) ? -Math.round((1 - S.anim.p) * S.LW) : 0, floorTop(fIdx(id)));
   } else ctx.drawImage(stCv, 0, 0);
   S.dim += ((NIGHT || (S.total > 0 && S.working / S.total <= 0.1) ? 1 : 0) - S.dim) * Math.min(1, S.dt * 0.8);
@@ -1104,7 +1138,7 @@ function* walkTo(a, tx) {
   const x0 = a.x, dist = Math.abs(tx - x0);
   if (dist < 0.5) { a.x = tx; return; }
   a.facing = tx > x0 ? 1 : -1; a.walking = true;
-  const dur = clamp(dist / 56, 0.3, 8);
+  const dur = clamp(dist / (a.spd || 56), 0.3, 8);
   let last = x0;
   yield* tween(dur, (p) => { const x = lerp(x0, tx, walkEase(p)); a.phase += Math.abs(x - last) / 4.5; last = x; a.x = x; });
   a.x = tx; a.walking = false;
@@ -1179,13 +1213,45 @@ function* goTo(a, room, x) {
 
 const homeOf = (a) => (a.visitor ? { room: LOBBY, x: BM + 14 } : { room: a.room, x: slotX(a.room, Math.max(0, a.slot)) });
 
+function* exitBuilding(a) {
+  yield* goTo(a, LOBBY, EXC());
+  if (!a.gone) { yield* leaveAndSit(a); return; }
+  yield* tween(0.35, (p) => { if (a.gone) a.alpha = 1 - p; });
+  if (!a.gone) { a.alpha = 1; yield* leaveAndSit(a); return; }
+  S.agents.delete(a.id);
+}
+
 function* leaveAndSit(a) {
+  if (a.gone && !a.visitor) { yield* exitBuilding(a); return; }
   const h = homeOf(a);
   yield* goTo(a, h.room, h.x);
   if (a.visitor) { S.agents.delete(a.id); return; }
   yield* sitDown(a);
-  a.away = false; a.fr = a.room; a.x = slotX(a.room, Math.max(0, a.slot)); a.sit = 1; a.facing = 1; a.walking = false; a.hop = 0;
+  a.away = false; a.spd = 0; a.fr = a.room; a.x = slotX(a.room, Math.max(0, a.slot)); a.sit = 1; a.facing = 1; a.walking = false; a.hop = 0;
   if (a.gone) S.agents.delete(a.id);
+}
+
+function freeSeat(a) {
+  a.leaving = false;
+  if (S.agents.get(a.id) === a) return;
+  const px = slotX(a.room, Math.max(0, a.slot)) + 14, room = a.room;
+  if (S.last) applyState(S.last);
+  if (S.floors.includes(room) && !S.anim) S.puffs.push({ x: px, y: footY(fIdx(room)), t0: S.t });
+}
+
+function* leaveTask(a) {
+  yield* until(() => activeMovers(a) < 2 || !a.gone);
+  if (!a.gone) { freeSeat(a); return; }
+  a.away = true; a.fr = a.room; a.spd = 95;
+  yield* stand(a);
+  yield* exitBuilding(a);
+  freeSeat(a);
+}
+
+function* fadeTask(a) {
+  yield* tween(0.5, (p) => { if (a.gone) a.alpha = 1 - p; });
+  if (a.gone) S.agents.delete(a.id); else a.alpha = 1;
+  freeSeat(a);
 }
 
 function* trip(a, bid, text) {
@@ -1462,11 +1528,13 @@ function startDemo() {
     push();
     return ag.id;
   };
+  const CORE = ['dashboard', 'gateway', 'infra', 'docs'];
   const retire = () => {
-    const ag = extras.shift();
+    const ag = extras.find((x) => !CORE.includes(x.room)) || extras[0];
     if (!ag) return;
+    extras.splice(extras.indexOf(ag), 1);
     agents.splice(agents.indexOf(ag), 1);
-    if (!agents.some((x) => x.room === ag.room) && !['dashboard', 'gateway', 'infra', 'docs'].includes(ag.room)) rooms.splice(rooms.findIndex((r) => r.id === ag.room), 1);
+    if (!agents.some((x) => x.room === ag.room) && !CORE.includes(ag.room)) rooms.splice(rooms.findIndex((r) => r.id === ag.room), 1);
     push();
   };
   window.__demoJoin = (np) => addAgent(!!np);
@@ -1476,7 +1544,7 @@ function startDemo() {
       yield* until(() => !night && !UI.tour && movers() < 3);
       addAgent(nx % 3 === 2);
       yield* wait(24 + Rn() * 8);
-      if (extras.length >= 3) retire();
+      if (extras.length >= 3) { yield* until(() => !S.focusVisitor && movers() < 3); retire(); }
     }
   })());
   if (SIM) spawn((function* () {
@@ -2041,7 +2109,9 @@ function stepUi(dt) {
   if (S.anim) {
     const k = (S.t - S.anim.t0) / S.anim.dur;
     S.anim.p = ease(clamp(k, 0, 1));
-    if (k >= 1) { S.anim = null; S.fc = null; S.bgCv = null; }
+    S.anim.ps = ease(clamp(k / 0.6, 0, 1));
+    S.anim.pf = S.anim.out.length ? ease(clamp((k - 0.4) / 0.6, 0, 1)) : S.anim.p;
+    if (k >= 1) { if (S.anim.keepH > S.LH) setCanvasH(S.LH); S.anim = null; S.fc = null; S.bgCv = null; E.fid = null; }
   }
   const T = UI.tour;
   if (T) T.shown = Math.min(T.text.length, Math.floor((S.t - T.t0) * TYPE_CPS));
@@ -2104,7 +2174,7 @@ window.__office = {
   floors: () => S.floors.map((id, i) => ({ id, top: floorTop(i), foot: footY(i), y: floorTop(fIdx(id)) })),
   labels: () => S.floors.map((id, i) => labelLines(id).rows.map((r, j) => ({ id, x: BM + 3, y: floorTop(i) + 7 + j * 8 + (r.sm ? 1 : 0), w: fitW(r.t, r.sm), h: r.sm ? 5 : 7, t: r.t, sm: !!r.sm }))).flat(),
   desks: () => { const o = []; for (const [rid, arr] of S.slots) arr.forEach((aid, k) => { if (aid) o.push({ id: aid, room: rid, x: slotX(rid, k), y: footY(fIdx(rid)) }); }); return o; },
-  agents: () => [...S.agents.values()].map((a) => ({ id: a.id, name: a.name, state: a.state, room: a.room, fr: a.fr, x: a.x, y: yOf(a), sit: a.sit, away: a.away, queued: a.q && a.fr === BOSS && !a.walking && !a.inCab, settled: settledAway(a), q: a.q, title: a.title, walking: a.walking, facing: a.facing, inCab: a.inCab, visitor: a.visitor, bubble: a.bubble ? bubbleRect(a) : null })),
+  agents: () => [...S.agents.values()].map((a) => ({ id: a.id, name: a.name, state: a.state, room: a.room, fr: a.fr, x: a.x, y: yOf(a), sit: a.sit, away: a.away, queued: a.q && a.fr === BOSS && !a.walking && !a.inCab, settled: settledAway(a), q: a.q, title: a.title, walking: a.walking, facing: a.facing, inCab: a.inCab, visitor: a.visitor, gone: a.gone, leaving: !!a.leaving, alpha: a.alpha, bubble: a.bubble ? bubbleRect(a) : null })),
   elevator: () => ({ fy: E.fy, open: E.open, queue: E.queue.length, rider: E.rider ? E.rider.id : null, x: EXC(), foot: cabFoot(), h: cabH() }),
   boss: () => ({ x: bossX(), foot: footY(0), spot: bossSpot(), desk: { x: bossX() - 12, y: footY(0) - 25, w: BOSS_DESK_W + 17, h: 25 }, floor: BOSS }),
   focus: (id, at) => { setFocus(id, at || String(Date.now())); return true; },
@@ -2123,6 +2193,8 @@ window.__office = {
   settings: () => ({ ...S.set }),
   server: () => SERVER,
   animating: () => !!S.anim,
+  anim: () => (S.anim ? { p: S.anim.p, pf: S.anim.pf, ps: S.anim.ps, out: S.anim.out.length } : null),
+  apply: (raw) => applyState(raw),
   animations: () => S.animCount || 0,
   particles: () => S.particles.length,
   ui: () => ({ settings: UI.settings, tour: UI.tour ? { step: UI.tour.step, shown: UI.tour.shown, len: UI.tour.text.length, text: UI.tour.text, did: UI.tour.did } : null, U: { ...U }, dialog: UI.dialog, strip: UI.strip, geo: UI.geo ? { x: UI.geo.x, y: UI.geo.y, w: UI.geo.w, h: UI.geo.h, rows: UI.geo.rows, n: UI.geo.n } : null, dpr: window.devicePixelRatio || 1, canvas: (() => { const r = uc.getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width, h: r.height }; })() }),

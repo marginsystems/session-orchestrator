@@ -1005,6 +1005,86 @@ async function perf() {
   }
 }
 
+const leaveState = (drop) => {
+  const rooms = ['r1', 'r2', 'r3', 'r4'].filter((r) => !(drop.rooms || []).includes(r)).map((r) => ({ id: r, label: 'room ' + r }));
+  const agents = [];
+  for (const r of rooms) for (let k = 0; k < 2; k++) { const id = r.id + '_a' + k; if (!(drop.agents || []).includes(id)) agents.push({ id, name: 'Ag' + id, room: r.id, state: k ? 'idle' : 'working' }); }
+  return { rooms, agents, events: [], generatedAt: Date.now() };
+};
+
+async function leaveCheck(vw, vh, tag) {
+  const { ctx, page, errors } = await open(vw, vh, 1, `file://${ROOT}/index.html?onboarding=0`, 600);
+  const feed = (drop) => page.evaluate((st) => window.__office.apply(st), leaveState(drop));
+  await feed({});
+  await sleep(1500);
+  const base = await page.evaluate(() => ({ d: window.__office.desks().length, x: window.__office.elevator().x, ag: window.__office.agents().length }));
+  check(base.d === 8 && base.ag === 8, `${tag} leave setup has ${base.d} desks, ${base.ag} agents`);
+  await feed({ agents: ['r1_a0'] });
+  const start = await page.evaluate(() => window.__office.agents().find((a) => a.id === 'r1_a0'));
+  let closer = false, cab = false, deskKept = false, goneAt = -1, shot = false;
+  for (let i = 0; i < 100; i++) {
+    await sleep(100);
+    const s = await page.evaluate(() => ({ a: window.__office.agents().find((a) => a.id === 'r1_a0'), desk: window.__office.desks().some((d) => d.id === 'r1_a0'), n: window.__office.agents().length }));
+    if (!s.a) { goneAt = i; break; }
+    if (i < 4 && s.desk && s.a) deskKept = true;
+    if (Math.abs(s.a.x - base.x) < Math.abs(start.x - base.x) - 8 || s.a.inCab) closer = true;
+    if (s.a.inCab) cab = true;
+    if (!shot && s.a.walking && Math.abs(s.a.x - start.x) > 70) { shot = true; await page.screenshot({ path: join(SHOTS, `leave-anims-${tag}-walkout.png`) }); }
+  }
+  check(deskKept, `${tag} desk vanished as soon as the agent was removed`);
+  check(closer && cab, `${tag} removed agent did not walk to the elevator and board (closer ${closer}, cab ${cab})`);
+  check(goneAt > 3 && goneAt >= 0, `${tag} removed agent vanished at once or never left (${goneAt})`);
+  const after = await page.evaluate(() => ({ d: window.__office.desks().map((d) => d.id), ag: window.__office.agents().length }));
+  check(!after.d.includes('r1_a0') && after.ag === 7, `${tag} desk not freed after the agent left`);
+  const back = leaveState({});
+  await page.evaluate((st) => window.__office.apply(st), back);
+  await sleep(300);
+  await feed({ agents: ['r4_a1'] });
+  await sleep(500);
+  await page.evaluate((st) => window.__office.apply(st), back);
+  let sat = false;
+  for (let i = 0; i < 300 && !sat; i++) {
+    await sleep(100);
+    const a = await page.evaluate(() => window.__office.agents().find((x) => x.id === 'r4_a1'));
+    sat = !!a && !a.away && a.sit === 1 && !a.gone;
+  }
+  check(sat, `${tag} agent that reappeared while leaving did not go back to its desk`);
+  await feed({ rooms: ['r2'] });
+  let slid = false, stillDrawn = false, ghostOut = 0, shot2 = false, shot3 = false;
+  for (let i = 0; i < 600; i++) {
+    await sleep(60);
+    const s = await page.evaluate(() => ({ an: window.__office.anim(), fl: window.__office.floors().map((f) => f.id), ag: window.__office.agents().length }));
+    if (s.an && s.an.out > 0) {
+      slid = true; ghostOut++;
+      if (!shot3) { shot3 = true; await page.screenshot({ path: join(SHOTS, `leave-anims-${tag}-firstframe.png`) }); }
+      if (!shot2 && s.an.ps > 0.25) { shot2 = true; await page.screenshot({ path: join(SHOTS, `leave-anims-${tag}-slideout.png`) }); }
+    }
+    if (s.an && s.an.out > 0 && s.fl.length === 5) stillDrawn = true;
+    if (!s.an && slid) break;
+  }
+  check(slid && ghostOut >= 3, `${tag} removed floor never slid out (${ghostOut} frames)`);
+  check(stillDrawn, `${tag} removed floor not kept while animating`);
+  await sleep(300);
+  const final = await page.evaluate(() => ({ fl: window.__office.floors(), ds: window.__office.desks(), w: window.__office.world(), an: window.__office.animating(), ch: document.getElementById('cv').height, ag: window.__office.agents().map((a) => ({ id: a.id, x: a.x, y: a.y })).sort((p, q) => (p.id < q.id ? -1 : 1)) }));
+  check(!final.an, `${tag} removal animation never finished`);
+  check(final.ch === final.w.h, `${tag} canvas height ${final.ch} not shrunk to the world ${final.w.h}`);
+  const fresh = await open(vw, vh, 1, `file://${ROOT}/index.html?onboarding=0`, 600);
+  await fresh.page.evaluate((st) => window.__office.apply(st), leaveState({ rooms: ['r2'] }));
+  await sleep(1800);
+  const ref = await fresh.page.evaluate(() => ({ fl: window.__office.floors(), ds: window.__office.desks(), w: window.__office.world(), ag: window.__office.agents().map((a) => ({ id: a.id, x: a.x, y: a.y })).sort((p, q) => (p.id < q.id ? -1 : 1)) }));
+  check(JSON.stringify(final.fl) === JSON.stringify(ref.fl), `${tag} floors differ from a fresh load: ${JSON.stringify(final.fl)} vs ${JSON.stringify(ref.fl)}`);
+  check(JSON.stringify(final.ds) === JSON.stringify(ref.ds) && JSON.stringify(final.w) === JSON.stringify(ref.w), `${tag} desks or world differ from a fresh load`);
+  check(JSON.stringify(final.ag) === JSON.stringify(ref.ag), `${tag} agents differ from a fresh load ${JSON.stringify(final.ag)} vs ${JSON.stringify(ref.ag)}`);
+  check(final.fl.length === 5 && final.fl.every((f) => Math.abs(f.y - f.top) < 0.01), `${tag} floors not settled ${JSON.stringify(final.fl)}`);
+  check(errors.length === 0 && fresh.errors.length === 0, `${tag} leave console errors ${errors.join('|')} ${fresh.errors.join('|')}`);
+  await fresh.ctx.close();
+  await ctx.close();
+}
+
+if (want('leave') || want('ui')) {
+  await leaveCheck(1280, 720, 'l1280');
+  await leaveCheck(390, 844, 'l390');
+}
 if (want('demo')) {
   const sizes = [[1280, 720], [1920, 1080], [750, 1000], [390, 844]];
   for (const dpr of [1, 2]) for (const [w, h] of sizes) await runDemo(w, h, dpr, `d${w}x${dpr}`);
