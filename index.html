@@ -1281,7 +1281,12 @@ function* focusTrip(a, token, fromLine) {
   else if (a.visitor) { a.fr = LOBBY; a.x = BM + 14; a.sit = 0; a.facing = 1; yield* wait(0.2); }
   else yield* stand(a);
   if (alive()) {
-    if (fromLine) yield* walkTo(a, bossSpot()); else yield* goTo(a, BOSS, bossSpot());
+    if (!fromLine) {
+      yield* goTo(a, BOSS, secX());
+      a.facing = 1;
+      if (alive()) { SEC.t0 = S.t; yield* wait(1); }
+    }
+    yield* walkTo(a, bossSpot());
     a.facing = -1;
     if (alive()) {
       yield* until(() => !B.away || !alive());

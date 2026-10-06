@@ -459,6 +459,35 @@ function makeFixture(root) {
   return out;
 }
 
+function makeCrowd(root) {
+  const projects = [['bulk', 12], ['p1', 5], ['p2', 5], ['p3', 5], ['p4', 5], ['p5', 5]];
+  const out = [];
+  let age = 10;
+  for (const [project, count] of projects) {
+    const dir = join(root, '.claude', 'projects', '-work-' + project);
+    mkdirSync(dir, { recursive: true });
+    for (let n = 0; n < count; n++) {
+      out.push({ project, ageSec: age += 10, ...writeSession(dir, project, age) });
+    }
+  }
+  const oldest = { project: 'bulk', ageSec: 5000, ...writeSession(join(root, '.claude', 'projects', '-work-bulk'), 'bulk', 5000) };
+  out.push(oldest);
+  const meta = join(root, 'Library', 'Application Support', 'Claude', 'claude-code-sessions', 'acct', 'org');
+  mkdirSync(meta, { recursive: true });
+  writeFileSync(join(meta, 'local_crowd1.json'), JSON.stringify({ sessionId: 'local_crowd1', cliSessionId: oldest.uuid }));
+  return { sessions: out, oldest };
+}
+
+function writeSession(dir, project, ageSec) {
+  const uuid = randomUUID();
+  const ts = new Date(Date.now() - ageSec * 1000).toISOString();
+  const file = join(dir, uuid + '.jsonl');
+  writeFileSync(file, JSON.stringify({ type: 'user', userType: 'external', cwd: '/work/' + project, timestamp: ts, message: { role: 'user', content: 'task' } }) + '\n');
+  const at = new Date(Date.now() - ageSec * 1000);
+  utimesSync(file, at, at);
+  return { uuid, file, id: agentId(uuid) };
+}
+
 const spawned = [];
 process.on('exit', () => { for (const c of spawned) c.kill(); });
 function startServer(home, port, extra = []) {
@@ -609,6 +638,39 @@ if (want('server')) {
   await sleep(300);
 }
 
+if (want('server')) {
+  const home = mkdtempSync(join(tmpdir(), 'so-crowd-'));
+  const { sessions, oldest } = makeCrowd(home);
+  const focusFile = join(home, '.session-orchestrator', 'focus.json');
+  mkdirSync(join(home, '.session-orchestrator'), { recursive: true });
+  const crowdServer = startServer(home, SPORT + 2);
+  await sleep(1500);
+  let s = await stateOf(SPORT + 2);
+  check(s.agents.length === 30, `crowd: expected the 30 session cap, got ${s.agents.length}`);
+  check(!s.agents.some((a) => a.id === oldest.id), 'crowd: the oldest session was picked without focus');
+  writeFileSync(focusFile, JSON.stringify({ sessionId: 'local_crowd1', at: new Date().toISOString() }));
+  s = await waitState(SPORT + 2, (st) => st.focus && st.focus.agentId);
+  check(s.focus && s.focus.agentId === oldest.id, `crowd: local id mapped to ${s.focus && s.focus.agentId}`);
+  check(s.agents.some((a) => a.id === oldest.id), 'crowd: focused agent missing from agents');
+  check(s.agents.length === 30, `crowd: focus changed the cap to ${s.agents.length}`);
+  check(s.agents.filter((a) => a.room === (s.agents.find((x) => x.id === oldest.id) || {}).room).length === 6, 'crowd: focus exceeded the per-room cap');
+  check(!s.queue.includes('visitor'), 'crowd: queue contains a visitor');
+  writeFileSync(focusFile, JSON.stringify({ sessionId: oldest.uuid, at: new Date().toISOString() }));
+  s = await waitState(SPORT + 2, (st) => st.focus && st.focus.agentId === oldest.id);
+  check(s.focus && s.focus.agentId === oldest.id && s.agents.some((a) => a.id === oldest.id), 'crowd: bare uuid not mapped to the agent');
+  writeFileSync(focusFile, JSON.stringify({ sessionId: 'local_unknown9', at: new Date().toISOString() }));
+  s = await waitState(SPORT + 2, (st) => st.focus && st.focus.agentId === 'visitor');
+  check(s.focus && s.focus.agentId === 'visitor', 'crowd: unknown local id did not stay visitor');
+  writeFileSync(focusFile, JSON.stringify({ sessionId: randomUUID(), at: new Date().toISOString() }));
+  s = await waitState(SPORT + 2, (st) => st.focus && st.focus.agentId === 'visitor');
+  check(s.focus && s.focus.agentId === 'visitor', 'crowd: unknown uuid did not stay visitor');
+  check(sessions.length > 30, 'crowd: fixture too small');
+  console.log('crowd ok');
+  crowdServer.kill();
+  rmSync(home, { recursive: true, force: true });
+  await sleep(300);
+}
+
 if (want('live')) {
   const home = mkdtempSync(join(tmpdir(), 'so-live-'));
   const fx = makeFixture(home);
@@ -697,6 +759,23 @@ if (want('live')) {
     const forward = await ev(page, () => window.__office.agents().find((a) => a.id === window.__office.queue().want[0]));
     if (forward) check(Math.abs(forward.x - after.spots[0]) < 0.6 || forward.walking, 'live: next in line did not move to the front chair');
     check(errors.length === 0, 'live queue console errors ' + errors.join('|'));
+    await ctx.close();
+  }
+  {
+    const seated = fx.find((f) => f.project === 'atlas' && f.ageSec === 3600);
+    writeFileSync(join(home, '.session-orchestrator', 'focus.json'), JSON.stringify({ sessionId: seated.uuid, at: new Date().toISOString() }));
+    const { ctx, page, errors } = await open(1280, 720, 1, base, 800);
+    let atSecretary = false, atBoss = false;
+    for (let i = 0; i < 400 && !atBoss; i++) {
+      await sleep(100);
+      const s = await ev(page, (id) => ({ a: window.__office.agents().find((x) => x.id === id) || null, sec: window.__office.secretary(), boss: window.__office.boss() }), seated.id);
+      if (!s.a) continue;
+      if (s.a.fr === '__boss' && Math.abs(s.a.x - s.sec.x) < 3 && s.sec.waving) atSecretary = true;
+      if (atSecretary && s.a.fr === '__boss' && s.a.bubble && Math.abs(s.a.x - s.boss.spot) < 0.6) atBoss = true;
+    }
+    check(atSecretary, 'live: seated focus agent did not stop at the secretary while she waved');
+    check(atBoss, 'live: seated focus agent did not continue to the boss spot after the secretary waved');
+    check(errors.length === 0, 'live seated focus console errors ' + errors.join('|'));
     await ctx.close();
   }
   {

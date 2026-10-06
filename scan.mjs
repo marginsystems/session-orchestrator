@@ -247,15 +247,14 @@ function validateSettings(input) {
   return { value: out };
 }
 
-function readFocus(now, desktop, byUuid) {
+function readFocus(now, desktop) {
   try {
     const f = JSON.parse(readFileSync(FOCUS_FILE, 'utf8'));
     const at = Date.parse(f.at);
     const sid = typeof f.sessionId === 'string' ? f.sessionId : '';
     if (sid && Number.isFinite(at) && at <= now && now - at < FOCUS_MAX_MS) {
       const uuid = sid.startsWith('local_') ? (desktop.get(sid) || {}).cli : sid;
-      const target = uuid && byUuid.get(uuid);
-      return { agentId: target ? target.id : 'visitor', at };
+      return { uuid: typeof uuid === 'string' ? uuid : '', at };
     }
   } catch {}
   return null;
@@ -339,9 +338,14 @@ function scan(now = Date.now()) {
     }
   }
 
+  const wanted = readFocus(now, desktop);
+  const focusUuid = wanted ? wanted.uuid : '';
+
   const rooms = new Map();
   const picked = [];
-  for (const s of found) {
+  const focused = found.find((s) => s.uuid === focusUuid);
+  const candidates = focused ? [focused, ...found.filter((s) => s !== focused)] : found;
+  for (const s of candidates) {
     if (picked.length >= OPTS.max) break;
     const info = analyzeCached(s.p, s.st);
     if (!info.cwd) continue;
@@ -356,6 +360,7 @@ function scan(now = Date.now()) {
     room.count++;
     picked.push({ ...s, info, room });
   }
+  picked.sort((a, b) => b.mtime - a.mtime);
 
   for (const s of picked) s.room.latest = Math.max(s.room.latest || 0, s.mtime);
 
@@ -401,7 +406,8 @@ function scan(now = Date.now()) {
   }
   events.sort((a, b) => a.at - b.at);
 
-  const focus = readFocus(now, desktop, byUuid);
+  const target = focusUuid ? byUuid.get(focusUuid) : null;
+  const focus = wanted ? { agentId: target ? target.id : 'visitor', at: wanted.at } : null;
 
   const ordered = [...rooms.values()].sort((a, b) => {
     const ra = priorityRank(a), rb = priorityRank(b);
