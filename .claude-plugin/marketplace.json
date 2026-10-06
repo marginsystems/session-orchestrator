@@ -1,0 +1,12 @@
+{
+  "name": "session-orchestrator",
+  "description": "Marketplace for the Session Orchestrator plugin",
+  "owner": { "name": "marginsystems" },
+  "plugins": [
+    {
+      "name": "session-orchestrator",
+      "source": "./",
+      "description": "A local pixel-art agent office for your Claude Code sessions. Run /office to open it."
+    }
+  ]
+}

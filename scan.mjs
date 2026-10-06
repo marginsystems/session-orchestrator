@@ -1,9 +1,12 @@
 import { createServer } from 'node:http';
-import { readFileSync, readdirSync, statSync, openSync, readSync, closeSync } from 'node:fs';
+import { readFileSync, readdirSync, statSync, openSync, readSync, closeSync, writeFileSync, renameSync, mkdirSync } from 'node:fs';
+import { spawn } from 'node:child_process';
+import { request } from 'node:http';
 import { homedir } from 'node:os';
 import { join, basename, dirname } from 'node:path';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import { isHumanPrompt } from './lib/prompts.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const argv = process.argv.slice(2);
@@ -20,7 +23,12 @@ const OPTS = {
   max: Number(opt('--max', '30')),
 };
 
-const FOCUS_FILE = join(homedir(), '.session-orchestrator', 'focus.json');
+const DATA_DIR = join(homedir(), '.session-orchestrator');
+const FOCUS_FILE = join(DATA_DIR, 'focus.json');
+const SETTINGS_FILE = join(DATA_DIR, 'settings.json');
+const SETTINGS_MAX_BYTES = 4096;
+const ORDER_MAX = 64;
+const SPEEDS = [1, 2, 3];
 const FOCUS_MAX_MS = 24 * 3600 * 1000;
 const PROJECTS = join(homedir(), '.claude', 'projects');
 const DESKTOP_SESSIONS = join(homedir(), 'Library', 'Application Support', 'Claude', 'claude-code-sessions');
@@ -90,6 +98,7 @@ function analyzeFile(path, size) {
   if (!cwd) cwd = lastCwd(readRange(path, 0, Math.min(size, HEAD_BYTES)));
   let last = null;
   const messages = [];
+  const prompts = [];
   const seen = new Set();
   for (const line of tail.split('\n')) {
     if (!line) continue;
@@ -113,6 +122,10 @@ function analyzeFile(path, size) {
     } catch {
       continue;
     }
+    if (o.type === 'user' && isHumanPrompt(o)) {
+      const at = Date.parse(o.timestamp);
+      if (Number.isFinite(at)) prompts.push({ at });
+    }
     if ((o.type !== 'user' && o.type !== 'assistant') || o.isSidechain) continue;
     const c = o.message && o.message.content;
     const blocks = Array.isArray(c) ? c : [];
@@ -122,10 +135,13 @@ function analyzeFile(path, size) {
       last = { kind: blocks.some((b) => b && b.type === 'tool_result') ? 'tool_result' : 'prompt' };
     }
   }
-  return { cwd, last, messages };
+  return { cwd, last, messages, prompts };
 }
 
 const fileCache = new Map();
+const known = new Set();
+const joinAt = new Map();
+let scanned = false;
 
 function analyzeCached(path, st) {
   const key = st.mtimeMs + ':' + st.size;
@@ -135,7 +151,7 @@ function analyzeCached(path, st) {
   try {
     value = analyzeFile(path, st.size);
   } catch {
-    value = { cwd: null, last: null, messages: [] };
+    value = { cwd: null, last: null, messages: [], prompts: [] };
   }
   fileCache.set(path, { key, value });
   return value;
@@ -201,7 +217,70 @@ function roomLabel(root) {
   return basename(root) || '/';
 }
 
-const roomOrder = [];
+
+const DEFAULT_SETTINGS = { order: [], anonymize: false, titles: false, speed: 1, sound: false, onboardedAt: null };
+const SETTING_KEYS = Object.keys(DEFAULT_SETTINGS);
+const ORDER_ITEM_RE = /^[^\u0000-\u001f<>]{1,64}$/;
+
+function validateSettings(input) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return { error: 'settings must be an object' };
+  const out = {};
+  for (const [k, v] of Object.entries(input)) {
+    if (!SETTING_KEYS.includes(k)) return { error: 'unknown key ' + k.slice(0, 40) };
+    if (k === 'order') {
+      if (!Array.isArray(v) || v.length > ORDER_MAX) return { error: 'order must be an array of at most ' + ORDER_MAX };
+      if (!v.every((x) => typeof x === 'string' && ORDER_ITEM_RE.test(x))) return { error: 'order items must be short strings' };
+      if (new Set(v).size !== v.length) return { error: 'order items must be unique' };
+      out.order = v;
+    } else if (k === 'speed') {
+      if (!SPEEDS.includes(v)) return { error: 'speed must be one of ' + SPEEDS.join(', ') };
+      out.speed = v;
+    } else if (k === 'onboardedAt') {
+      if (v !== null && !(typeof v === 'string' && v.length <= 40 && Number.isFinite(Date.parse(v)))) return { error: 'onboardedAt must be null or an ISO date' };
+      out.onboardedAt = v;
+    } else {
+      if (typeof v !== 'boolean') return { error: k + ' must be a boolean' };
+      out[k] = v;
+    }
+  }
+  return { value: out };
+}
+
+function loadSettings() {
+  try {
+    const raw = readFileSync(SETTINGS_FILE, 'utf8');
+    if (raw.length > SETTINGS_MAX_BYTES * 4) return { ...DEFAULT_SETTINGS };
+    const parsed = JSON.parse(raw);
+    const kept = {};
+    for (const k of SETTING_KEYS) {
+      if (!(k in parsed)) continue;
+      const r = validateSettings({ [k]: parsed[k] });
+      if (r.value) Object.assign(kept, r.value);
+    }
+    return { ...DEFAULT_SETTINGS, ...kept };
+  } catch {
+    return { ...DEFAULT_SETTINGS };
+  }
+}
+
+let settings = loadSettings();
+
+function saveSettings(next) {
+  mkdirSync(DATA_DIR, { recursive: true, mode: 0o700 });
+  const tmp = SETTINGS_FILE + '.' + process.pid + '.tmp';
+  writeFileSync(tmp, JSON.stringify(next, null, 2) + '\n', { mode: 0o600 });
+  renameSync(tmp, SETTINGS_FILE);
+}
+
+const anonymizing = () => OPTS.anonymize || settings.anonymize;
+const showingTitles = () => OPTS.titles || settings.titles;
+
+function priorityRank(room) {
+  const order = settings.order;
+  let i = order.indexOf(room.id);
+  if (i < 0) i = order.findIndex((x) => x.toLowerCase() === roomLabel(room.root).toLowerCase());
+  return i < 0 ? Infinity : i;
+}
 
 function scan(now = Date.now()) {
   const desktop = desktopSessions();
@@ -234,6 +313,16 @@ function scan(now = Date.now()) {
     }
   }
   found.sort((a, b) => b.mtime - a.mtime);
+  if (!scanned) {
+    for (const f of found) known.add(f.uuid);
+    scanned = true;
+  } else {
+    for (const f of found) {
+      if (known.has(f.uuid)) continue;
+      known.add(f.uuid);
+      if (now - f.st.birthtimeMs < WINDOW_MS) joinAt.set(f.uuid, now);
+    }
+  }
 
   const rooms = new Map();
   const picked = [];
@@ -253,9 +342,7 @@ function scan(now = Date.now()) {
     picked.push({ ...s, info, room });
   }
 
-  const alive = new Set(picked.map((s) => s.room.id));
-  for (let i = roomOrder.length - 1; i >= 0; i--) if (!alive.has(roomOrder[i])) roomOrder.splice(i, 1);
-  for (const s of picked) if (!roomOrder.includes(s.room.id)) roomOrder.push(s.room.id);
+  for (const s of picked) s.room.latest = Math.max(s.room.latest || 0, s.mtime);
 
   const names = new Set();
   const byUuid = new Map();
@@ -273,12 +360,12 @@ function scan(now = Date.now()) {
     names.add(name);
     const agent = { id: 'a' + sha(s.uuid).slice(0, 8), name, room: s.room.id, state };
     if (state === 'idle' && age > SLEEPY_MS) agent.sleepy = true;
-    if (OPTS.titles) {
+    if (showingTitles()) {
       const rec = cliToLocal.get(s.uuid);
       if (rec && rec.title) agent.title = String(rec.title);
     }
     byUuid.set(s.uuid, agent);
-    agents.push({ agent, s });
+    agents.push({ agent, s, state });
   }
 
   const events = [];
@@ -288,8 +375,14 @@ function scan(now = Date.now()) {
       const rec = desktop.get(m.from);
       const sender = rec && byUuid.get(rec.cli);
       const from = sender ? sender.id : 'visitor';
-      events.push({ id: 'e' + sha(from + agent.id + Math.floor(m.at / 1000)).slice(0, 10), at: m.at, from, to: agent.id });
+      events.push({ id: 'e' + sha(from + agent.id + Math.floor(m.at / 1000)).slice(0, 10), kind: 'message', at: m.at, from, to: agent.id });
     }
+    for (const p of s.info.prompts) {
+      if (now - p.at > EVENT_MS) continue;
+      events.push({ id: 'p' + sha('boss' + agent.id + Math.floor(p.at / 1000)).slice(0, 10), kind: 'boss_visit', at: p.at, to: agent.id });
+    }
+    const joined = joinAt.get(s.uuid);
+    if (joined !== undefined && now - joined < EVENT_MS) events.push({ id: 'j' + sha('join' + s.uuid).slice(0, 10), kind: 'join', at: joined, agentId: agent.id });
   }
   events.sort((a, b) => a.at - b.at);
 
@@ -305,20 +398,52 @@ function scan(now = Date.now()) {
     }
   } catch {}
 
-  const roomById = new Map([...rooms.values()].map((r) => [r.id, r]));
-  const ordered = roomOrder.filter((id) => roomById.has(id));
-  const outRooms = ordered.map((id, i) => ({
-    id,
-    label: OPTS.anonymize ? 'Room ' + String.fromCharCode(65 + (i % 26)) + (i >= 26 ? Math.floor(i / 26) : '') : roomLabel(roomById.get(id).root),
+  const ordered = [...rooms.values()].sort((a, b) => {
+    const ra = priorityRank(a), rb = priorityRank(b);
+    if (ra !== rb) return ra < rb ? -1 : 1;
+    return b.latest - a.latest;
+  });
+  const rankOfRoom = new Map(ordered.map((r, i) => [r.id, i]));
+  const outRooms = ordered.map((r, i) => ({
+    id: r.id,
+    label: anonymizing() ? 'Room ' + String.fromCharCode(65 + (i % 26)) + (i >= 26 ? Math.floor(i / 26) : '') : roomLabel(r.root),
   }));
+  const queue = agents
+    .filter((x) => x.state === 'waiting')
+    .sort((a, b) => rankOfRoom.get(a.s.room.id) - rankOfRoom.get(b.s.room.id) || a.s.mtime - b.s.mtime)
+    .map((x) => x.agent.id);
 
-  return { generatedAt: now, rooms: outRooms, agents: agents.map((a) => a.agent), events, focus };
+  return { generatedAt: now, rooms: outRooms, agents: agents.map((a) => a.agent), events, focus, queue };
 }
 
 function counts(snap) {
   const c = { working: 0, waiting: 0, idle: 0 };
   for (const a of snap.agents) c[a.state]++;
   return `rooms=${snap.rooms.length} agents=${snap.agents.length} working=${c.working} waiting=${c.waiting} idle=${c.idle} events=${snap.events.length}`;
+}
+
+const URL_BASE = `http://127.0.0.1:${OPTS.port}`;
+
+function probe() {
+  return new Promise((resolve) => {
+    const req = request({ host: '127.0.0.1', port: OPTS.port, path: '/state.json', timeout: 800 }, (res) => {
+      res.resume();
+      resolve(res.statusCode === 200);
+    });
+    req.on('error', () => resolve(false));
+    req.on('timeout', () => { req.destroy(); resolve(false); });
+    req.end();
+  });
+}
+
+if (flag('--ensure')) {
+  if (!(await probe())) {
+    const child = spawn(process.execPath, [fileURLToPath(import.meta.url), ...argv.filter((a) => a !== '--ensure')], { detached: true, stdio: 'ignore' });
+    child.unref();
+    for (let i = 0; i < 30 && !(await probe()); i++) await new Promise((r) => setTimeout(r, 150));
+  }
+  console.log((await probe()) ? `session-orchestrator is running at ${URL_BASE}` : `could not start session-orchestrator on port ${OPTS.port}`);
+  process.exit(0);
 }
 
 if (OPTS.once) {
@@ -335,18 +460,90 @@ setInterval(() => {
   } catch {}
 }, 2000).unref?.();
 
+const sameOrigin = (req) => {
+  const origin = req.headers.origin;
+  if (origin !== `http://127.0.0.1:${OPTS.port}` && origin !== `http://localhost:${OPTS.port}`) return false;
+  const site = req.headers['sec-fetch-site'];
+  return !site || site === 'same-origin';
+};
+
+function readBody(req, limit) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let size = 0;
+    req.on('data', (c) => {
+      size += c.length;
+      if (size > limit) {
+        reject(Object.assign(new Error('too large'), { code: 413 }));
+        req.destroy();
+        return;
+      }
+      chunks.push(c);
+    });
+    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
+    req.on('error', reject);
+  });
+}
+
+async function postSettings(req, res, headers) {
+  const json = (code, body) => {
+    res.writeHead(code, { ...headers, 'content-type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify(body));
+  };
+  if (!sameOrigin(req)) return json(403, { error: 'cross-origin request refused' });
+  if (!/^application\/json(\s*;|$)/i.test(req.headers['content-type'] || '')) return json(415, { error: 'content-type must be application/json' });
+  const declared = Number(req.headers['content-length'] || 0);
+  if (declared > SETTINGS_MAX_BYTES) {
+    req.resume();
+    return json(413, { error: 'body too large' });
+  }
+  let body;
+  try {
+    body = await readBody(req, SETTINGS_MAX_BYTES);
+  } catch (e) {
+    return json(e.code === 413 ? 413 : 400, { error: 'unreadable body' });
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    return json(400, { error: 'invalid json' });
+  }
+  const r = validateSettings(parsed);
+  if (r.error) return json(400, { error: r.error });
+  const next = { ...settings, ...r.value };
+  try {
+    saveSettings(next);
+  } catch {
+    return json(500, { error: 'could not save settings' });
+  }
+  settings = next;
+  try {
+    snapshot = scan();
+  } catch {}
+  return json(200, settings);
+}
+
 const server = createServer((req, res) => {
   const host = (req.headers.host || '').toLowerCase();
   const okHost = host === `127.0.0.1:${OPTS.port}` || host === `localhost:${OPTS.port}`;
-  if (!okHost || req.method !== 'GET') {
+  const path = (req.url || '/').split('?')[0];
+  const headers = { 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' };
+  if (!okHost || (req.method !== 'GET' && !(req.method === 'POST' && path === '/settings'))) {
     res.writeHead(403).end();
     return;
   }
-  const path = (req.url || '/').split('?')[0];
-  const headers = { 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' };
-  if (path === '/state.json') {
+  if (req.method === 'POST') {
+    postSettings(req, res, headers).catch(() => {
+      if (!res.headersSent) res.writeHead(500, headers);
+      res.end();
+    });
+  } else if (path === '/state.json') {
     res.writeHead(200, { ...headers, 'content-type': 'application/json; charset=utf-8' });
     res.end(JSON.stringify(snapshot));
+  } else if (path === '/settings') {
+    res.writeHead(200, { ...headers, 'content-type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify(settings));
   } else if (path === '/' || path === '/index.html') {
     try {
       const html = readFileSync(join(HERE, 'index.html'));
@@ -365,5 +562,5 @@ server.on('error', (e) => {
   process.exit(1);
 });
 server.listen(OPTS.port, '127.0.0.1', () => {
-  console.log(`session-orchestrator on http://127.0.0.1:${OPTS.port}  (${counts(snapshot)})`);
+  console.log(`session-orchestrator on ${URL_BASE}  (${counts(snapshot)})`);
 });

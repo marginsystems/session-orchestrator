@@ -1,52 +1,145 @@
 # session-orchestrator
 
-A local-only pixel-art "agent office" for Claude Code sessions. One building is drawn in cross-section: every project folder is a floor, every session is a cute pixel critter at a desk (colour, ears and one accessory come from a hash of its id), and a single elevator carries agents between floors when one session messages another. A Boss Office penthouse sits on top, and the Lobby at the bottom is where unknown visitors walk in.
+A local-only, retro pixel-art "agent office" for your Claude Code sessions.
 
-- Working: the agent types with a focused face and the CRT scrolls text.
-- Idle: blinks, looks around, sips coffee, stretches; after a long idle the head goes down on the desk with a pixel "Z".
-- Waiting: a "..." thought bubble.
-- Cross-session message: the sender stands up, walks to the elevator (or straight along the floor), rides to the recipient's floor, shows a short bubble at their desk, and returns. When the building is mostly idle the lights dim slightly.
+![Session Orchestrator demo](docs/demo.gif)
 
-## Run
+> GIF placeholder: record the office in demo mode (`?demo=1`) and save it as `docs/demo.gif`.
+
+Every project folder is a floor, every Claude Code session is a pixel critter at its desk, and a Boss Office sits on top. Sessions that are waiting for you take a number and sit in the Secretary's waiting room, ordered by floor priority and then by how long they have waited. An elevator carries agents between floors.
+
+Everything on screen reflects something that really happens:
+
+- Working: the critter types and the CRT scrolls. Waiting: a thought bubble, or a seat in the waiting room. Idle: blinks, sips coffee, stretches, and eventually naps.
+- You prompt a session directly: the boss gets up, rides the elevator to that session's desk, they exchange a short line, and he goes back to his chair.
+- One session messages another: the sender walks to the recipient's desk (via the elevator when on another floor).
+- A new session starts: a desk drops in on the project's floor, a dust puff, and the new critter rides up from the Lobby and sits. A brand-new project gets a new floor that slides in.
+- `next` (see below): the front of the line gets waved through by the secretary and walks into the Boss Office.
+
+Nothing leaves your machine. See [Privacy](#privacy).
+
+## Install
+
+### As a Claude Code plugin
+
+In a Claude Code session:
+
+```
+/plugin marketplace add marginsystems/session-orchestrator
+/plugin install session-orchestrator@session-orchestrator
+```
+
+Then run `/office` (also available as `/session-orchestrator:office`). It starts `node scan.mjs` in the background if it is not already running and prints the local URL, `http://127.0.0.1:7777`.
+
+From a shell, the same thing is:
+
+```
+claude plugin marketplace add marginsystems/session-orchestrator
+claude plugin install session-orchestrator@session-orchestrator
+```
+
+The repository is private for now, so the marketplace add needs git credentials that can read it.
+
+### Plain `git clone`
+
+```
+git clone https://github.com/marginsystems/session-orchestrator
+cd session-orchestrator
+node scan.mjs
+```
+
+Open http://127.0.0.1:7777. Node 18 or newer, no `npm install`.
+
+### Demo, no server
+
+Open `index.html?demo=1` straight from disk. It runs a scripted office with generic names: ten agents in four rooms, a boss queue, boss visits, new sessions joining and the secretary flow. Add `&night=1` for dimmed lights, `&hud=0` to hide the header, `&speed=2` to speed it up, `&onboarding=0` to skip the tour. Settings persist in `localStorage` there.
+
+## Run options
 
 ```
 node scan.mjs                 # serves http://127.0.0.1:7777
 node scan.mjs --once          # prints counts only
 node scan.mjs --once --json   # prints the state.json snapshot
+node scan.mjs --ensure        # starts the server in the background if it is not running
 ```
 
-Open `index.html?demo=1` (straight from disk, no server) for the scripted demo with 10 fake agents in 4 rooms; every 12 to 15 seconds it simulates a `next` that summons one agent to the Boss Office. Add `&night=1` to see the dimmed lights, `&hud=0` to hide the header.
+Flags: `--port <n>`, `--anonymize-rooms` (rooms become Room A, B, C, for screen recordings), `--show-titles` (shows session titles as name tags above the critters), `--max <n>` (agent cap, default 30; at most 6 agents per room and 12 rooms).
 
-Flags: `--port <n>`, `--anonymize-rooms` (rooms become Room A, B, C), `--show-titles` (shows real session titles locally; off by default), `--max <n>` (agent cap, default 30; at most 6 agents per room and 12 rooms).
+Floors show the real project folder name (the repo root for a worktree). Session titles are hidden unless you opt in.
 
-## Next: summoning an agent to the Boss Office
+## Settings
 
-The orchestrator session writes `~/.session-orchestrator/focus.json` when Mark types `next`, so the item's agent walks into his office:
+Click the gear in the header. The panel is a small retro window over the office.
+
+- **Floor priority**: the list of projects. Drag a row, or use the up and down buttons (or the arrow keys on a focused row). Floor order is priority: the highest priority sits right under the Boss Office, the lowest just above the Lobby. The building re-stacks with the floors sliding into place. Projects you have not ordered go below the ordered ones, most recently active first.
+- **Anonymize rooms**: hides project names (Room A, B, C).
+- **Show session titles**: shows a small name tag above each critter.
+- **Demo speed**: 1x, 2x or 3x, for the demo.
+- **Sound**: stored for later, nothing plays yet.
+- **Reset onboarding**: replays the tour.
+
+Settings are saved to `~/.session-orchestrator/settings.json` through the loopback server (`GET /settings`, `POST /settings`). `POST` takes a JSON object with only the known keys (`order`, `anonymize`, `titles`, `speed`, `sound`, `onboardedAt`), is limited to 4 KB, requires `Content-Type: application/json`, and is accepted only from the same origin. Without a server (demo, or a copy of the page opened from disk) settings fall back to `localStorage`.
+
+## Onboarding
+
+The first time you open the office, the Boss walks you through six short steps: your office, floors and critters, the three states, setting priorities (you drag a floor, and confetti follows), the boss queue and `next`, and the privacy promise. Skip any time with Skip or Esc. Add `?onboarding=1` to force it, or `?onboarding=0` to suppress it.
+
+## The `next` contract
+
+An orchestrator session (or anything else) writes `~/.session-orchestrator/focus.json` when you want a session brought to the boss:
 
 ```
 {"sessionId": "local_...", "at": "2026-10-06T12:00:00Z"}
 ```
 
-`sessionId` may be a desktop `local_...` id or a transcript uuid. `scan.mjs` only reads the file (never writes it), maps the id to an agent the same way message senders are mapped, and adds `focus: {agentId, at}` to `state.json`. When focus changes, that agent takes the elevator up, stands in front of the boss's desk and says a generic line while the boss looks up; it walks back to its desk when focus changes or clears. An unknown session sends a Guest up from the Lobby. A missing file or one older than 24 hours means no focus.
+`sessionId` may be a desktop `local_...` id or a transcript uuid. `scan.mjs` only reads the file, never writes it, maps the id to an agent the same way message senders are mapped, and adds `focus: {agentId, at}` to `state.json`. The secretary waves that agent through, it walks into the Boss Office, stands in front of his desk and says a generic line while the boss looks up. It goes back to its desk when focus changes or clears. An unknown session sends a Guest up from the Lobby. A missing file or one older than 24 hours means no focus.
 
-## Privacy guarantees
+The front of the waiting line is the agent `next` would bring in: waiting agents ordered by floor priority, then by how long they have waited. `state.json` lists them in `queue`.
+
+## state.json
+
+```
+{
+  generatedAt,
+  rooms:  [{id, label}],
+  agents: [{id, name, room, state, title?}],
+  events: [{id, kind: "message", at, from, to}
+         | {id, kind: "boss_visit", at, to}
+         | {id, kind: "join", at, agentId}],
+  focus:  {agentId, at} | null,
+  queue:  [agentId, ...]
+}
+```
+
+- `rooms` are already in priority order.
+- A `boss_visit` is emitted for a genuine human prompt in a transcript. Tool results, cross-session messages, task notifications, system reminders, scheduled-task wrappers and other injected turns do not count (`lib/prompts.mjs`).
+- A `join` is emitted when a session whose transcript was created recently appears after the server started. Sessions that existed at startup are not announced.
+
+## Privacy
 
 - No network calls. The server binds to 127.0.0.1 only, rejects other Host headers, and the page loads no external resource. Zero npm dependencies; Node built-ins only.
-- Everything is read-only. `~/.claude/projects` and the Claude desktop session metadata are only read, never written.
-- Transcript content, session titles, file paths, branch names and message text are never emitted (the focus file's session id is only mapped to an agent hash and never forwarded). Agents get names derived from a hash of the session id, and ids in `state.json` are hashes too. Rooms show the folder name (the repo root for a worktree) or "Room A/B/C" with `--anonymize-rooms`. Speech bubbles come from a fixed generic set.
+- Everything under `~/.claude` and the Claude desktop session metadata is only read, never written. The only file this tool writes is `~/.session-orchestrator/settings.json`.
+- Transcript content, file paths, branch names and message text are never emitted. Agents get names derived from a hash of the session id, and ids in `state.json` are hashes too. Session titles appear only if you turn them on. Speech bubbles come from a fixed generic set.
+- The demo uses generic names only.
 
 ## How state is detected
 
 For each transcript in `~/.claude/projects/<slug>/<uuid>.jsonl` modified in the last 7 days, the tail of the file gives the working directory and the last conversation entry. A session is `working` if the file changed within 30 seconds, or its last entry is a tool call or a user prompt with no reply yet (up to 2 minutes). A tool call left pending for 2 to 10 minutes counts as `waiting`; anything else is `idle`, and idle for 30 minutes shows the sleepy "z". Cross-session messages are found as `<cross-session-message from-session="local_...">` turns in the recipient transcript; the sender id is mapped to a transcript through the Claude desktop session metadata, and an unmapped sender walks in from the lobby as a visitor.
 
-## state.json
-
-```
-{generatedAt, rooms:[{id,label}], agents:[{id,name,room,state}], events:[{id,at,from,to}], focus:{agentId,at}|null}
-```
-
 ## Tests
 
-`test/check.mjs` is a dev-only Playwright script (not a dependency of the app): layout and alignment assertions, walker and elevator paths, bubbles, console errors, CPU and pause-when-hidden at several viewport sizes and DPRs. Run with `PW_DIR=<dir containing node_modules/playwright> node test/check.mjs`.
+`test/check.mjs` is a dev-only Playwright script and not a dependency of the app. Install Playwright in a scratch directory outside the repo and run:
+
+```
+PW_DIR=<dir containing node_modules/playwright> SHOTS=<scratch dir> node test/check.mjs
+```
+
+`ONLY=unit,server,live,demo,ui,perf` runs a subset. It covers human prompt detection against synthetic fixtures, the settings API (validation, size limit, origin checks, persistence, priority and queue order) against a temporary `HOME`, the settings panel, the tour, the queue and secretary, boss visits and joins, layout and alignment, console errors, CPU and pause-when-hidden at 1280x720, 1920x1080, 750x1000 and 390x844 at device pixel ratios 1 and 2.
+
+## Roadmap
+
+- An in-app pane, so the office lives inside the Claude Code window instead of a browser tab. Planned, not built.
+- Sound.
+- A hook that writes `focus.json` for you.
 
 MIT licensed.
