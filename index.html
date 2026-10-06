@@ -254,7 +254,7 @@ const statEl = document.getElementById('stat');
 const stCv = document.createElement('canvas');
 const stC = stCv.getContext('2d');
 
-const S = { rooms: [], floors: [BOSS, LOBBY], agents: new Map(), slots: new Map(), Hf: 70, s: 2, dpr: 1, LW: 380, LH: 300, t: 0, dt: 0.07, dim: 0, sig: '', tasks: [], vid: 0, sky: 'day', counts: { working: 0, waiting: 0, idle: 0 }, msg: '', focus: null, frames: 0, dyn: { coffees: [] }, set: null, last: null, queue: [], want: [], anim: null, fc: null, bgCv: null, posting: 0, wall: new Map(), visits: [], drops: new Map(), puffs: [], joined: new Set(), firstApplied: false, gotState: false, setReady: false, particles: [] };
+const S = { rooms: [], floors: [BOSS, LOBBY], agents: new Map(), slots: new Map(), Hf: 70, s: 2, dpr: 1, LW: 380, LH: 300, t: 0, dt: 0.07, dim: 0, sig: '', tasks: [], vid: 0, sky: 'day', counts: { working: 0, waiting: 0, idle: 0 }, msg: '', focus: null, frames: 0, dyn: { coffees: [] }, set: null, last: null, queue: [], want: [], anim: null, fc: null, bgCv: null, posting: 0, wall: new Map(), visits: [], visitLog: [], drops: new Map(), puffs: [], joined: new Set(), firstApplied: false, gotState: false, setReady: false, particles: [] };
 const E = { fy: 0, open: 0, moving: false, queue: [], rider: null, use: new Map(), ding: null };
 let SERVER = false;
 const BS = { react: -9, style: styleFor('boss', true) };
@@ -1290,7 +1290,10 @@ function* bossVisit(id) {
   a.react = S.t;
   yield* wait(0.5);
   let reply = null;
-  if (!a.away && !a.bubble) { reply = { text: 'ON IT, BOSS!', t0: S.t }; a.bubble = reply; }
+  const entry = { id, agentAway: a.away, agentBubble: !!a.bubble, answered: false };
+  S.visitLog.push(entry);
+  if (S.visitLog.length > 100) S.visitLog.shift();
+  if (!a.away && !a.bubble) { reply = { text: 'ON IT, BOSS!', t0: S.t }; a.bubble = reply; entry.answered = true; }
   yield* wait(2.5);
   B.bubble = null;
   if (reply && a.bubble === reply) a.bubble = null;
@@ -2181,6 +2184,7 @@ window.__office = {
   clearFocus: () => setFocus(null),
   bossActor: () => ({ x: B.x, y: yOf(B), fr: B.fr, away: B.away, sit: B.sit, inCab: B.inCab, bubble: B.bubble ? bubbleRect(B) : null, desk: B.fr === BOSS ? null : null, chair: bossX(), visits: S.visits.length }),
   visit: (id) => pushVisit(id),
+  visitLog: () => S.visitLog.map((v) => ({ ...v })),
   join: (np) => (window.__demoJoin ? window.__demoJoin(np) : null),
   secretary: () => ({ x: secX(), waving: S.t - SEC.t0 < 1.4 }),
   trip: (fromId, toId, text) => startTrip(fromId, toId || '', text || TEXTS[0]),

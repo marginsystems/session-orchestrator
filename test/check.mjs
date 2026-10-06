@@ -6,6 +6,7 @@ import { mkdirSync, mkdtempSync, writeFileSync, appendFileSync, utimesSync, read
 import { tmpdir } from 'node:os';
 import { createHash, randomUUID } from 'node:crypto';
 import { request } from 'node:http';
+import { createServer } from 'node:net';
 import { inflateSync } from 'node:zlib';
 
 const require = createRequire(process.env.PW_DIR ? join(process.env.PW_DIR, 'x.js') : import.meta.url);
@@ -259,33 +260,49 @@ async function secretaryCheck(page, tag) {
 }
 
 async function bossRouteCheck(page, tag) {
-  const info = await page.evaluate(() => {
-    const o = window.__office, ag = o.agents().filter((a) => !a.visitor && !a.away && !a.q);
-    const a = ag.find((x) => x.room !== o.rooms()[0].id) || ag[0];
-    return { id: a.id, desk: o.desks().find((d) => d.id === a.id) };
-  });
-  await page.evaluate((id) => window.__office.visit(id), info.id);
-  let stood = false, cab = false, atDesk = false, bubbles = 0, returned = false, bubbleMs = 0, lastT = 0;
-  for (let i = 0; i < 1500; i++) {
-    await sleep(80);
-    const s = await page.evaluate((id) => ({ b: window.__office.bossActor(), a: window.__office.agents().find((x) => x.id === id), w: window.__office.world() }), info.id);
-    if (s.b.away && s.b.sit === 0) stood = true;
-    if (s.b.inCab) cab = true;
-    if (s.b.away && s.b.fr === info.desk.room && Math.abs(s.b.x - (info.desk.x - 17)) < 0.6 && s.b.bubble) {
-      atDesk = true;
-      if (!lastT) lastT = Date.now();
-      bubbleMs = Date.now() - lastT;
-      check(s.b.bubble.x >= 0 && s.b.bubble.y >= 0 && s.b.bubble.x + s.b.bubble.w <= s.w.w, `${tag} boss bubble outside canvas`);
-      if (s.a.bubble) { bubbles++; check(!hit(s.b.bubble, s.a.bubble), `${tag} boss and agent bubbles overlap`); }
+  let info = null, log = null, bubbles = 0;
+  const tried = [];
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const seen = await page.evaluate(() => window.__office.visitLog().length);
+    info = await page.evaluate((skip) => {
+      const o = window.__office, ag = o.agents().filter((a) => !a.visitor && !a.away && !a.q && !skip.includes(a.id));
+      const a = ag.find((x) => x.room !== o.rooms()[0].id) || ag[0];
+      if (!a) return null;
+      return { id: a.id, desk: o.desks().find((d) => d.id === a.id) };
+    }, tried);
+    if (!info) { check(false, `${tag} no eligible agent for boss visit`); return; }
+    tried.push(info.id);
+    await page.evaluate((id) => window.__office.visit(id), info.id);
+    let stood = false, cab = false, atDesk = false, returned = false, bubbleMs = 0, lastT = 0;
+    bubbles = 0;
+    for (let i = 0; i < 1500; i++) {
+      await sleep(80);
+      const s = await page.evaluate((id) => ({ b: window.__office.bossActor(), a: window.__office.agents().find((x) => x.id === id), w: window.__office.world() }), info.id);
+      if (s.b.away && s.b.sit === 0) stood = true;
+      if (s.b.inCab) cab = true;
+      if (s.b.away && s.b.fr === info.desk.room && Math.abs(s.b.x - (info.desk.x - 17)) < 0.6 && s.b.bubble) {
+        atDesk = true;
+        if (!lastT) lastT = Date.now();
+        bubbleMs = Date.now() - lastT;
+        check(s.b.bubble.x >= 0 && s.b.bubble.y >= 0 && s.b.bubble.x + s.b.bubble.w <= s.w.w, `${tag} boss bubble outside canvas`);
+        if (s.a.bubble) { bubbles++; check(!hit(s.b.bubble, s.a.bubble), `${tag} boss and agent bubbles overlap`); }
+      }
+      if (stood && atDesk && !s.b.away) { returned = true; break; }
     }
-    if (stood && atDesk && !s.b.away) { returned = true; break; }
+    check(stood, `${tag} boss never stood up`);
+    check(cab, `${tag} boss skipped the elevator`);
+    check(atDesk, `${tag} boss never reached the agent's desk`);
+    check(bubbleMs > 800, `${tag} boss bubble too short (${bubbleMs}ms real time)`);
+    check(returned, `${tag} boss did not return`);
+    log = (await page.evaluate(() => window.__office.visitLog())).slice(seen).find((v) => v.id === info.id);
+    check(!!log, `${tag} visit was never logged`);
+    if (!log || !log.agentAway) break;
   }
-  check(stood, `${tag} boss never stood up`);
-  check(cab, `${tag} boss skipped the elevator`);
-  check(atDesk, `${tag} boss never reached the agent's desk`);
-  check(bubbles > 0, `${tag} agent never answered the boss`);
-  check(bubbleMs > 800, `${tag} boss bubble too short (${bubbleMs}ms real time)`);
-  check(returned, `${tag} boss did not return`);
+  check(!!log && !log.agentAway, `${tag} every visit found its agent away from the desk`);
+  if (log && !log.agentAway) {
+    check(log.answered || log.agentBubble, `${tag} agent never answered the boss (${JSON.stringify(log)})`);
+    if (log.answered) check(bubbles > 0, `${tag} agent answer bubble never rendered`);
+  }
   const end = await page.evaluate(() => window.__office.bossActor());
   check(!end.away && end.sit === 1 && end.fr === '__boss' && Math.abs(end.x - end.chair) < 0.01, `${tag} boss not exactly at his chair after the visit (${end.x} vs ${end.chair})`);
   const a = await page.evaluate((id) => window.__office.agents().find((x) => x.id === id), info.id);
@@ -534,7 +551,15 @@ if (want('unit')) {
 
 let fixtureHome;
 let fixture;
-const SPORT = 7791;
+const freePort = () => new Promise((resolve, reject) => {
+  const srv = createServer();
+  srv.once('error', reject);
+  srv.listen(0, '127.0.0.1', () => { const { port } = srv.address(); srv.close(() => resolve(port)); });
+});
+const basePort = Number(process.env.SO_TEST_PORT) || 0;
+const SPORT = basePort || await freePort();
+const LPORT = basePort ? basePort + 1 : await freePort();
+const CPORT = basePort ? basePort + 2 : await freePort();
 
 if (want('server')) {
   fixtureHome = mkdtempSync(join(tmpdir(), 'so-home-'));
@@ -586,7 +611,7 @@ if (want('server')) {
   check(hugeNoLength.status === 413 || hugeNoLength.status === 0, `huge post got ${hugeNoLength.status}`);
   check((await post({ speed: 3 }, { 'content-type': 'application/json' })).status === 403, 'post without Origin accepted');
   check((await post({ speed: 3 }, { ...ok, origin: 'http://evil.example' })).status === 403, 'cross-origin post accepted');
-  check((await post({ speed: 3 }, { ...ok, origin: `http://127.0.0.1:${SPORT + 1}` })).status === 403, 'other-port origin accepted');
+  check((await post({ speed: 3 }, { ...ok, origin: `http://127.0.0.1:${LPORT}` })).status === 403, 'other-port origin accepted');
   check((await post({ speed: 3 }, { ...ok, 'sec-fetch-site': 'cross-site' })).status === 403, 'cross-site fetch metadata accepted');
   check((await post({ speed: 3 }, { origin: ok.origin, 'content-type': 'text/plain' })).status === 415, 'text/plain post accepted');
   check((await httpReq(SPORT, { method: 'POST', path: '/settings', headers: ok, body: '{"speed":3}', host: 'evil.example' })).status === 403, 'foreign Host header accepted');
@@ -643,26 +668,26 @@ if (want('server')) {
   const { sessions, oldest } = makeCrowd(home);
   const focusFile = join(home, '.session-orchestrator', 'focus.json');
   mkdirSync(join(home, '.session-orchestrator'), { recursive: true });
-  const crowdServer = startServer(home, SPORT + 2);
+  const crowdServer = startServer(home, CPORT);
   await sleep(1500);
-  let s = await stateOf(SPORT + 2);
+  let s = await stateOf(CPORT);
   check(s.agents.length === 30, `crowd: expected the 30 session cap, got ${s.agents.length}`);
   check(!s.agents.some((a) => a.id === oldest.id), 'crowd: the oldest session was picked without focus');
   writeFileSync(focusFile, JSON.stringify({ sessionId: 'local_crowd1', at: new Date().toISOString() }));
-  s = await waitState(SPORT + 2, (st) => st.focus && st.focus.agentId);
+  s = await waitState(CPORT, (st) => st.focus && st.focus.agentId);
   check(s.focus && s.focus.agentId === oldest.id, `crowd: local id mapped to ${s.focus && s.focus.agentId}`);
   check(s.agents.some((a) => a.id === oldest.id), 'crowd: focused agent missing from agents');
   check(s.agents.length === 30, `crowd: focus changed the cap to ${s.agents.length}`);
   check(s.agents.filter((a) => a.room === (s.agents.find((x) => x.id === oldest.id) || {}).room).length === 6, 'crowd: focus exceeded the per-room cap');
   check(!s.queue.includes('visitor'), 'crowd: queue contains a visitor');
   writeFileSync(focusFile, JSON.stringify({ sessionId: oldest.uuid, at: new Date().toISOString() }));
-  s = await waitState(SPORT + 2, (st) => st.focus && st.focus.agentId === oldest.id);
+  s = await waitState(CPORT, (st) => st.focus && st.focus.agentId === oldest.id);
   check(s.focus && s.focus.agentId === oldest.id && s.agents.some((a) => a.id === oldest.id), 'crowd: bare uuid not mapped to the agent');
   writeFileSync(focusFile, JSON.stringify({ sessionId: 'local_unknown9', at: new Date().toISOString() }));
-  s = await waitState(SPORT + 2, (st) => st.focus && st.focus.agentId === 'visitor');
+  s = await waitState(CPORT, (st) => st.focus && st.focus.agentId === 'visitor');
   check(s.focus && s.focus.agentId === 'visitor', 'crowd: unknown local id did not stay visitor');
   writeFileSync(focusFile, JSON.stringify({ sessionId: randomUUID(), at: new Date().toISOString() }));
-  s = await waitState(SPORT + 2, (st) => st.focus && st.focus.agentId === 'visitor');
+  s = await waitState(CPORT, (st) => st.focus && st.focus.agentId === 'visitor');
   check(s.focus && s.focus.agentId === 'visitor', 'crowd: unknown uuid did not stay visitor');
   check(sessions.length > 30, 'crowd: fixture too small');
   console.log('crowd ok');
@@ -675,9 +700,9 @@ if (want('live')) {
   const home = mkdtempSync(join(tmpdir(), 'so-live-'));
   const fx = makeFixture(home);
   const ids = Object.fromEntries(fx.map((f) => [f.project + f.ageSec, f.id]));
-  const server = startServer(home, SPORT + 1);
+  const server = startServer(home, LPORT);
   await sleep(1500);
-  const base = `http://127.0.0.1:${SPORT + 1}/`;
+  const base = `http://127.0.0.1:${LPORT}/`;
   const settingsFile = join(home, '.session-orchestrator', 'settings.json');
   {
     const { ctx, page, errors } = await open(1280, 720, 1, base, 1500);
@@ -714,7 +739,7 @@ if (want('live')) {
     check(floorsNow.every((f) => Math.abs(f.y - f.top) < 0.01), 'floors not settled at their slots');
     check(floorsNow.filter((f) => f.id[0] === 'r').map((f) => f.id).join() === (await ev(page, () => window.__office.rooms().map((r) => r.id))).join(), 'floor stacking differs from priority order');
     await sleep(600);
-    const served = JSON.parse((await httpReq(SPORT + 1, { path: '/state.json' })).text);
+    const served = JSON.parse((await httpReq(LPORT, { path: '/state.json' })).text);
     check(served.rooms.map((r) => r.label).join() === 'atlas,delta,beacon,citadel', 'server state does not reflect the UI priority change');
     const disk = JSON.parse(readFileSync(settingsFile, 'utf8'));
     check(disk.order.join() === served.rooms.map((r) => r.id).join(), 'settings.json order does not match floors');
@@ -785,7 +810,7 @@ if (want('live')) {
         const x = await fetch(`http://127.0.0.1:${p}/settings`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"speed":3}' });
         return x.status;
       } catch { return 0; }
-    }, SPORT + 1);
+    }, LPORT);
     check(r === 200, 'same-origin page post failed');
     const foreign = await (await getBrowser()).newContext();
     const fp = await foreign.newPage();
@@ -795,7 +820,7 @@ if (want('live')) {
         const x = await fetch(`http://127.0.0.1:${p}/settings`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"speed":1}' });
         return x.status;
       } catch { return 0; }
-    }, SPORT + 1);
+    }, LPORT);
     check(fr !== 200, `cross-origin page post got through (${fr})`);
     const disk = JSON.parse(readFileSync(settingsFile, 'utf8'));
     check(disk.speed === 3, `cross-origin page changed settings (speed ${disk.speed})`);

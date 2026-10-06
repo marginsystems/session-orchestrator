@@ -145,6 +145,8 @@ The app itself has no runtime dependencies. `npm install` installs dev tools onl
 PW_DIR=<dir containing node_modules/playwright> SHOTS=<scratch dir> node test/check.mjs
 ```
 
+The server and live sections bind free ports picked at start; set `SO_TEST_PORT=<n>` to use `n`, `n+1` and `n+2` instead.
+
 `ONLY=unit,server,live,demo,ui,perf` runs a subset. It covers human prompt detection against synthetic fixtures, the settings API (validation, size limit, origin checks, persistence, priority and queue order) against a temporary `HOME`, the settings panel, the tour, the queue and secretary, boss visits and joins, layout and alignment, console errors, CPU and pause-when-hidden at 1280x720, 1920x1080, 750x1000 and 390x844 at device pixel ratios 1 and 2.
 
 ## Roadmap
