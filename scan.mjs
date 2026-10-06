@@ -20,6 +20,8 @@ const OPTS = {
   max: Number(opt('--max', '30')),
 };
 
+const FOCUS_FILE = join(homedir(), '.session-orchestrator', 'focus.json');
+const FOCUS_MAX_MS = 24 * 3600 * 1000;
 const PROJECTS = join(homedir(), '.claude', 'projects');
 const DESKTOP_SESSIONS = join(homedir(), 'Library', 'Application Support', 'Claude', 'claude-code-sessions');
 const WINDOW_MS = 7 * 24 * 3600 * 1000;
@@ -291,6 +293,18 @@ function scan(now = Date.now()) {
   }
   events.sort((a, b) => a.at - b.at);
 
+  let focus = null;
+  try {
+    const f = JSON.parse(readFileSync(FOCUS_FILE, 'utf8'));
+    const at = Date.parse(f.at);
+    const sid = typeof f.sessionId === 'string' ? f.sessionId : '';
+    if (sid && Number.isFinite(at) && at <= now && now - at < FOCUS_MAX_MS) {
+      const uuid = sid.startsWith('local_') ? (desktop.get(sid) || {}).cli : sid;
+      const target = uuid && byUuid.get(uuid);
+      focus = { agentId: target ? target.id : 'visitor', at };
+    }
+  } catch {}
+
   const roomById = new Map([...rooms.values()].map((r) => [r.id, r]));
   const ordered = roomOrder.filter((id) => roomById.has(id));
   const outRooms = ordered.map((id, i) => ({
@@ -298,7 +312,7 @@ function scan(now = Date.now()) {
     label: OPTS.anonymize ? 'Room ' + String.fromCharCode(65 + (i % 26)) + (i >= 26 ? Math.floor(i / 26) : '') : roomLabel(roomById.get(id).root),
   }));
 
-  return { generatedAt: now, rooms: outRooms, agents: agents.map((a) => a.agent), events };
+  return { generatedAt: now, rooms: outRooms, agents: agents.map((a) => a.agent), events, focus };
 }
 
 function counts(snap) {
