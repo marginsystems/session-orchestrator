@@ -2,9 +2,9 @@
 
 A local-only, retro pixel-art "agent office" for your Claude Code sessions.
 
-![Session Orchestrator demo](docs/demo.gif)
+![Session Orchestrator: floors of pixel critters at their desks, the Boss Office on top](docs/office.gif)
 
-> GIF placeholder: record the office in demo mode (`?demo=1`) and save it as `docs/demo.gif`.
+<!-- The recording lives at docs/office.gif. Record the office in demo mode (index.html?demo=1&onboarding=0, around 1280x720, 10 to 20 seconds, under 5 MB) so no real project names appear, and replace that one file. -->
 
 Every project folder is a floor, every Claude Code session is a pixel critter at its desk, and a Boss Office sits on top. Sessions that are waiting for you take a number and sit in the Secretary's waiting room, ordered by floor priority and then by how long they have waited. An elevator carries agents between floors.
 
@@ -125,6 +125,15 @@ The front of the waiting line is the agent `next` would bring in: waiting agents
 ## How state is detected
 
 For each transcript in `~/.claude/projects/<slug>/<uuid>.jsonl` modified in the last 7 days, the tail of the file gives the working directory and the last conversation entry. A session is `working` if the file changed within 30 seconds, or its last entry is a tool call or a user prompt with no reply yet (up to 2 minutes). A tool call left pending for 2 to 10 minutes counts as `waiting`; anything else is `idle`, and idle for 30 minutes shows the sleepy "z". Cross-session messages are found as `<cross-session-message from-session="local_...">` turns in the recipient transcript; the sender id is mapped to a transcript through the Claude desktop session metadata, and an unmapped sender walks in from the lobby as a visitor.
+
+## Known limits
+
+- Tested on macOS only. Transcripts are read from `~/.claude/projects` on any OS, but the Claude desktop app session metadata is read from `~/Library/Application Support/Claude`, so on Linux and Windows cross-session senders show as visitors, `local_...` ids in `focus.json` do not resolve, and session titles are unavailable.
+- `local_...` session ids exist only for sessions started in the Claude desktop app. For a terminal session, write its transcript uuid to `focus.json` instead.
+- State is a guess from transcript timing, not a live signal: `waiting` means a tool call has been pending for 2 to 10 minutes, usually a permission prompt. A session that has finished its turn and waits for your next prompt shows as idle.
+- Only transcripts changed in the last 7 days are shown, at most 30 agents, 6 per floor and 12 floors (`--max` raises the agent cap only).
+- The office is a browser tab on `127.0.0.1:7777`; `/office` always uses that port. There is no in-app pane yet.
+- No sound yet.
 
 ## Tests
 
