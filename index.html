@@ -72,10 +72,37 @@ function mix(hex, to, t) {
 const GLYPHS = {
   A: [14, 17, 17, 31, 17, 17, 17], B: [30, 17, 17, 30, 17, 17, 30], C: [14, 17, 16, 16, 16, 17, 14], D: [30, 17, 17, 17, 17, 17, 30], E: [31, 16, 16, 30, 16, 16, 31], F: [31, 16, 16, 30, 16, 16, 16], G: [14, 17, 16, 23, 17, 17, 15], H: [17, 17, 17, 31, 17, 17, 17], I: [14, 4, 4, 4, 4, 4, 14], J: [7, 2, 2, 2, 2, 18, 12], K: [17, 18, 20, 24, 20, 18, 17], L: [16, 16, 16, 16, 16, 16, 31], M: [17, 27, 21, 21, 17, 17, 17], N: [17, 17, 25, 21, 19, 17, 17], O: [14, 17, 17, 17, 17, 17, 14], P: [30, 17, 17, 30, 16, 16, 16], Q: [14, 17, 17, 17, 21, 18, 13], R: [30, 17, 17, 30, 20, 18, 17], S: [15, 16, 16, 14, 1, 1, 30], T: [31, 4, 4, 4, 4, 4, 4], U: [17, 17, 17, 17, 17, 17, 14], V: [17, 17, 17, 17, 17, 10, 4], W: [17, 17, 17, 21, 21, 21, 10], X: [17, 17, 10, 4, 10, 17, 17], Y: [17, 17, 17, 10, 4, 4, 4], Z: [31, 1, 2, 4, 8, 16, 31],
   0: [14, 17, 19, 21, 25, 17, 14], 1: [4, 12, 4, 4, 4, 4, 14], 2: [14, 17, 1, 2, 4, 8, 31], 3: [31, 2, 4, 2, 1, 17, 14], 4: [2, 6, 10, 18, 31, 2, 2], 5: [31, 16, 30, 1, 1, 17, 14], 6: [6, 8, 16, 30, 17, 17, 14], 7: [31, 1, 2, 4, 8, 8, 8], 8: [14, 17, 17, 14, 17, 17, 14], 9: [14, 17, 17, 15, 1, 2, 12],
-  '.': [0, 0, 0, 0, 0, 12, 12], '!': [4, 4, 4, 4, 4, 0, 4], '?': [14, 17, 1, 2, 4, 0, 4], "'": [4, 4, 8, 0, 0, 0, 0], '-': [0, 0, 0, 31, 0, 0, 0], ':': [0, 12, 12, 0, 12, 12, 0], ',': [0, 0, 0, 0, 12, 4, 8], '_': [0, 0, 0, 0, 0, 0, 31], '/': [1, 1, 2, 4, 8, 16, 16], '+': [0, 4, 4, 31, 4, 4, 0], '=': [0, 0, 31, 0, 31, 0, 0], ' ': [0, 0, 0, 0, 0, 0, 0],
+  '.': [0, 0, 0, 0, 0, 12, 12], '!': [4, 4, 4, 4, 4, 0, 4], '?': [14, 17, 1, 2, 4, 0, 4], "'": [4, 4, 8, 0, 0, 0, 0], '-': [0, 0, 0, 31, 0, 0, 0], ':': [0, 12, 12, 0, 12, 12, 0], ',': [0, 0, 0, 0, 12, 4, 8], '_': [0, 0, 0, 0, 0, 0, 31], '/': [1, 1, 2, 4, 8, 16, 16], '+': [0, 4, 4, 31, 4, 4, 0], '=': [0, 0, 31, 0, 31, 0, 0], ' ': [0, 0, 0, 0, 0, 0, 0], '…': [0, 0, 0, 0, 0, 0, 21],
 };
+const GLYPHS3 = {
+  A: [2, 5, 7, 5, 5], B: [6, 5, 6, 5, 6], C: [3, 4, 4, 4, 3], D: [6, 5, 5, 5, 6], E: [7, 4, 6, 4, 7], F: [7, 4, 6, 4, 4], G: [3, 4, 5, 5, 3], H: [5, 5, 7, 5, 5], I: [7, 2, 2, 2, 7], J: [1, 1, 1, 5, 2], K: [5, 5, 6, 5, 5], L: [4, 4, 4, 4, 7], M: [5, 7, 7, 5, 5], N: [6, 5, 5, 5, 5], O: [2, 5, 5, 5, 2], P: [6, 5, 6, 4, 4], Q: [2, 5, 5, 6, 3], R: [6, 5, 6, 5, 5], S: [3, 4, 2, 1, 6], T: [7, 2, 2, 2, 2], U: [5, 5, 5, 5, 7], V: [5, 5, 5, 5, 2], W: [5, 5, 7, 7, 5], X: [5, 5, 2, 5, 5], Y: [5, 5, 2, 2, 2], Z: [7, 1, 2, 4, 7],
+  0: [7, 5, 5, 5, 7], 1: [2, 6, 2, 2, 7], 2: [6, 1, 2, 4, 7], 3: [6, 1, 2, 1, 6], 4: [5, 5, 7, 1, 1], 5: [7, 4, 6, 1, 6], 6: [3, 4, 7, 5, 7], 7: [7, 1, 2, 2, 2], 8: [7, 5, 7, 5, 7], 9: [7, 5, 7, 1, 6],
+  '.': [0, 0, 0, 0, 2], '!': [2, 2, 2, 0, 2], '?': [6, 1, 2, 0, 2], "'": [2, 2, 0, 0, 0], '-': [0, 0, 7, 0, 0], ':': [0, 2, 0, 2, 0], ',': [0, 0, 0, 2, 4], '_': [0, 0, 0, 0, 7], '/': [1, 1, 2, 4, 4], '+': [0, 2, 7, 2, 0], '=': [0, 7, 0, 7, 0], ' ': [0, 0, 0, 0, 0], '…': [0, 0, 0, 0, 21],
+};
+const smallAdv = (ch) => (ch === '…' ? 6 : 4);
+const smallW = (t) => { let w = 0; for (const ch of t) w += smallAdv(ch); return Math.max(0, w - 1); };
+const fitW = (t, sm) => (sm ? smallW(t) : textW(t));
 const tcache = new Map();
-function textCv(t, col) {
+function smallCv(t, col) {
+  const k = col + '|s|' + t;
+  let cv = tcache.get(k);
+  if (cv) return cv;
+  if (tcache.size > 400) tcache.clear();
+  cv = document.createElement('canvas');
+  cv.width = Math.max(1, smallW(t)); cv.height = 5;
+  const c = cv.getContext('2d');
+  c.fillStyle = col;
+  let x0 = 0;
+  for (const ch of t) {
+    const g = GLYPHS3[ch] || GLYPHS3['?'], gw = ch === '…' ? 5 : 3;
+    for (let y = 0; y < 5; y++) for (let x = 0; x < gw; x++) if (g[y] & (1 << (gw - 1 - x))) c.fillRect(x0 + x, y, 1, 1);
+    x0 += smallAdv(ch);
+  }
+  tcache.set(k, cv);
+  return cv;
+}
+function textCv(t, col, sm) {
+  if (sm) return smallCv(t, col);
   const k = col + '|' + t;
   let cv = tcache.get(k);
   if (cv) return cv;
@@ -92,7 +119,40 @@ function textCv(t, col) {
   return cv;
 }
 const textW = (t) => Math.max(0, t.length * 6 - 1);
-function text(c, t, x, y, col) { if (t) c.drawImage(textCv(t, col), Math.round(x), Math.round(y)); }
+function text(c, t, x, y, col, sm) { if (t) c.drawImage(textCv(t, col, sm), Math.round(x), Math.round(y)); }
+const FOLD = { 'Ø': 'O', 'Æ': 'AE', 'Œ': 'OE', 'Ł': 'L', 'Đ': 'D', 'Ð': 'D', 'Þ': 'TH', '’': "'", '‘': "'", '–': '-', '—': '-', '‐': '-' };
+const fold = (s) => [...String(s).toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim()].map((ch) => FOLD[ch] || (GLYPHS[ch] ? ch : '?')).join('');
+const LABT = LABW - 5;
+function fitLine(s, pw) {
+  if (textW(s) <= pw) return { t: s };
+  if (smallW(s) <= pw) return { t: s, sm: 1 };
+  const cs = [...s];
+  let n = cs.length;
+  while (n > 0 && smallW(cs.slice(0, n).join('').replace(/[ \-_.]+$/, '') + '…') > pw) n--;
+  return { t: cs.slice(0, n).join('').replace(/[ \-_.]+$/, '') + '…', sm: 1 };
+}
+function splitName(s, pw) {
+  const toks = [];
+  let cur = '';
+  for (const ch of s) { cur += ch; if (' -_.'.includes(ch)) { toks.push(cur); cur = ''; } }
+  if (cur) toks.push(cur);
+  for (const sm of [0, 1]) {
+    let best = null;
+    for (let k = 1; k < toks.length; k++) {
+      const a = toks.slice(0, k).join('').trimEnd(), b = toks.slice(k).join('').trimStart();
+      const wa = fitW(a, sm), wb = fitW(b, sm);
+      if (wa > pw || wb > pw) continue;
+      if (!best || Math.max(wa, wb) < best.m) best = { m: Math.max(wa, wb), rows: [{ t: a, sm }, { t: b, sm }] };
+    }
+    if (best) return best.rows;
+  }
+  return null;
+}
+function nameRows(raw, pw) {
+  const s = fold(raw);
+  if (smallW(s) <= pw || textW(s) <= pw) return [fitLine(s, pw)];
+  return splitName(s, pw) || [fitLine(s, pw)];
+}
 const up = (s) => String(s).toUpperCase();
 
 const EARS = {
@@ -549,10 +609,7 @@ function labelLines(id) {
   if (id === LOBBY) rows.push({ t: 'LOBBY', col: '#f7e6bd' });
   else if (id === BOSS) { rows.push({ t: 'BOSS', col: '#ffcd75' }); rows.push({ t: 'OFFICE', col: '#f7e6bd' }); }
   else {
-    const name = up((S.rooms.find((r) => r.id === id) || {}).label || '');
-    const l2 = name.length > 9 ? (name.length > 18 ? name.slice(9, 17) + '.' : name.slice(9)) : '';
-    rows.push({ t: name.slice(0, 9), col: '#f7e6bd' });
-    if (l2) rows.push({ t: l2, col: '#f7e6bd' });
+    for (const r of nameRows((S.rooms.find((r) => r.id === id) || {}).label || '', LABT)) rows.push({ ...r, col: '#f7e6bd' });
     const cnt = (S.slots.get(id) || []).filter((x) => x && !(S.agents.get(x) || {}).joining).length;
     rows.push({ t: cnt + (cnt === 1 ? ' AGENT' : ' AGENTS'), col: '#e0b070' });
   }
@@ -581,7 +638,7 @@ function drawFloor(c, i, id, collect) {
   R(c, EX - 13, top, SHAFT, Hf - 2, '0'); R(c, EX - 13, top, 1, Hf - 2, 'f'); R(c, EX + 12, top, 1, Hf - 2, 'f');
   const lines = labelLines(id);
   R(c, BL + 1, top + 4, LABW - 2, lines.h, 'i'); R(c, BL + 1, top + 4, LABW - 2, 1, 'h'); R(c, BL + 1, top + 3 + lines.h, LABW - 2, 1, 'n');
-  lines.rows.forEach((r, j) => text(c, r.t, BL + 3, top + 7 + j * 8, r.col));
+  lines.rows.forEach((r, j) => text(c, r.t, BL + 3, top + 7 + j * 8 + (r.sm ? 1 : 0), r.col, r.sm));
   const arr = S.slots.get(id) || [];
   const ncell = cellsFor(id), pitch = pitchOf(id), L = zl();
   const rr = rng(hash(id) + 11);
@@ -1516,7 +1573,7 @@ function uiMeasure() {
 }
 
 const uR = (x, y, w, h, col) => R(uctx, x, y, w, h, col);
-const uT = (t, x, y, col) => text(uctx, t, x, y, col);
+const uT = (t, x, y, col, sm) => text(uctx, t, x, y, col, sm);
 
 function wrapText(t, cols) {
   const lines = [];
@@ -1878,7 +1935,8 @@ function drawPanel() {
     for (let a = 0; a < 3; a++) { uR(g.ix + 5, ry + 3 + a * 3, 2, 1, '#94b0c2'); uR(g.ix + 8, ry + 3 + a * 3, 2, 1, '#94b0c2'); }
     uT(String(i + 1), g.ix + 13, ry + 3, '#ffcd75');
     const maxc = Math.max(3, Math.floor((rowW - 26 - 26) / 6));
-    uT(up(label.get(id) || '').slice(0, maxc), g.ix + 13 + (order.length > 9 ? 17 : 11), ry + 3, '#f4f4f4');
+    const nm = fitLine(fold(label.get(id) || ''), maxc * 6 - 1);
+    uT(nm.t, g.ix + 13 + (order.length > 9 ? 17 : 11), ry + 3 + (nm.sm ? 1 : 0), '#f4f4f4', nm.sm);
     if (it) ring(it);
     if (floating) { uctx.fillStyle = '#ffcd75'; uctx.fillRect(g.ix, ry, rowW, 1); uctx.fillRect(g.ix, ry + RH - 2, rowW, 1); }
   };
@@ -2039,7 +2097,7 @@ raf = requestAnimationFrame(frame);
 window.__office = {
   scale: () => S.s / S.dpr, px: () => S.s, hf: () => S.Hf, dpr: () => S.dpr, frames: () => S.frames, world: () => ({ w: S.LW, h: S.LH }),
   floors: () => S.floors.map((id, i) => ({ id, top: floorTop(i), foot: footY(i), y: floorTop(fIdx(id)) })),
-  labels: () => S.floors.map((id, i) => labelLines(id).rows.map((r, j) => ({ id, x: BM + 3, y: floorTop(i) + 7 + j * 8, w: textW(r.t), h: 7 }))).flat(),
+  labels: () => S.floors.map((id, i) => labelLines(id).rows.map((r, j) => ({ id, x: BM + 3, y: floorTop(i) + 7 + j * 8 + (r.sm ? 1 : 0), w: fitW(r.t, r.sm), h: r.sm ? 5 : 7, t: r.t, sm: !!r.sm }))).flat(),
   desks: () => { const o = []; for (const [rid, arr] of S.slots) arr.forEach((aid, k) => { if (aid) o.push({ id: aid, room: rid, x: slotX(rid, k), y: footY(fIdx(rid)) }); }); return o; },
   agents: () => [...S.agents.values()].map((a) => ({ id: a.id, name: a.name, state: a.state, room: a.room, fr: a.fr, x: a.x, y: yOf(a), sit: a.sit, away: a.away, queued: a.q && a.fr === BOSS && !a.walking && !a.inCab, settled: settledAway(a), q: a.q, title: a.title, walking: a.walking, facing: a.facing, inCab: a.inCab, visitor: a.visitor, bubble: a.bubble ? bubbleRect(a) : null })),
   elevator: () => ({ fy: E.fy, open: E.open, queue: E.queue.length, rider: E.rider ? E.rider.id : null, x: EXC(), foot: cabFoot(), h: cabH() }),
@@ -2054,6 +2112,9 @@ window.__office = {
   dim: () => S.dim,
   queue: () => ({ queue: S.queue.slice(), want: S.want.slice(), cap: lineCap(), door: doorX(), hall: hallW(), spots: S.want.map((id, k) => lineX(k)), foot: footY(0), spot: bossSpot() }),
   rooms: () => S.rooms.map((r) => ({ id: r.id, label: r.label })),
+  load: (st) => { applyState(st); return true; },
+  fold: (t) => fold(t),
+  sign: () => ({ x: BM + 3, max: LABT, inner: LABW - 2 }),
   settings: () => ({ ...S.set }),
   server: () => SERVER,
   animating: () => !!S.anim,

@@ -930,8 +930,44 @@ if (want('demo')) {
   const sizes = [[1280, 720], [1920, 1080], [750, 1000], [390, 844]];
   for (const dpr of [1, 2]) for (const [w, h] of sizes) await runDemo(w, h, dpr, `d${w}x${dpr}`);
 }
+const NAMES = ['averyveryverylongprojectname', 'layer-by-layer-rollout', 'café-crème', '数据管道', 'a_b.c-d e', 'alpha', 'LONG-UPPER-NAME-HERE', 'fifteen-letters', 'two words here now'];
+async function runNames(vw, vh, dpr, tag) {
+  const { ctx, page, errors } = await open(vw, vh, dpr, `file://${ROOT}/index.html?onboarding=0`, 900);
+  const rooms = NAMES.map((label, i) => ({ id: 'n' + i, label }));
+  const agents = rooms.map((r, i) => ({ id: 'na' + i, name: 'Fern' + i, room: r.id, state: 'idle', since: 0 }));
+  await ev(page, (st) => window.__office.load(st), { rooms, agents, events: [], generatedAt: Date.now() });
+  await sleep(500);
+  const d = await ev(page, (names) => ({ labels: window.__office.labels(), sign: window.__office.sign(), folds: names.map((n) => window.__office.fold(n)) }), NAMES);
+  rooms.forEach((r, i) => {
+    const rows = d.labels.filter((l) => l.id === r.id), nameRows = rows.slice(0, -1), full = d.folds[i], ts = nameRows.map((l) => l.t), last = ts[ts.length - 1];
+    check(nameRows.length >= 1 && nameRows.length <= 2, `${tag} ${r.label} has ${nameRows.length} name rows`);
+    for (const l of nameRows) {
+      check(l.w <= d.sign.max, `${tag} ${r.label} row "${l.t}" is ${l.w}px, max ${d.sign.max}`);
+      check(l.x + l.w <= d.sign.x - 2 + d.sign.inner, `${tag} ${r.label} row "${l.t}" crosses the sign edge`);
+    }
+    if (last.endsWith('…')) check(ts.length === 1 && full.startsWith(last.slice(0, -1)), `${tag} ${r.label} bad ellipsis rows ${JSON.stringify(ts)}`);
+    else if (ts.length === 1) check(last === full, `${tag} ${r.label} single row "${last}" != "${full}"`);
+    else check(ts.join(' ') === full || (ts.join('') === full && /[-_.]$/.test(ts[0])), `${tag} ${r.label} split inside a word: ${JSON.stringify(ts)} of "${full}"`);
+  });
+  const hy = d.labels.filter((l) => l.id === 'n1').map((l) => l.t);
+  check(hy.length === 3 && hy[0].endsWith('-'), `${tag} hyphenated name not split at a hyphen: ${JSON.stringify(hy)}`);
+  check(d.labels.filter((l) => l.id === 'n3')[0].t === '????', `${tag} cjk name not question marks`);
+  await staticChecks(page, tag + '-names');
+  if (dpr === 1 && (vw === 1280 || vw === 390)) {
+    const dir = process.env.SHOTS_NAMES || SHOTS;
+    mkdirSync(dir, { recursive: true });
+    await page.screenshot({ path: join(dir, `office-${vw}.png`) });
+    await page.click('#gear');
+    await sleep(500);
+    check((await uiState(page)).settings, `${tag} settings did not open`);
+    await page.screenshot({ path: join(dir, `settings-${vw}.png`) });
+  }
+  check(errors.length === 0, `${tag} names console errors ${errors.join('|')}`);
+  await ctx.close();
+}
 if (want('ui')) {
   const sizes = [[1280, 720], [1920, 1080], [750, 1000], [390, 844]];
+  for (const dpr of [1, 2]) for (const [w, h] of sizes) await runNames(w, h, dpr, `n${w}x${dpr}`);
   for (const dpr of [1, 2]) for (const [w, h] of sizes) await runUi(w, h, dpr, `u${w}x${dpr}`);
 }
 if (want('perf')) await perf();
