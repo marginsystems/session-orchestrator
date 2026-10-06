@@ -137,6 +137,8 @@ For each transcript in `~/.claude/projects/<slug>/<uuid>.jsonl` modified in the 
 
 ## Tests
 
+The app itself has no runtime dependencies. `npm install` installs dev tools only (ESLint and TypeScript); `npm run check` runs lint, typecheck and the dependency-free unit tests (`node --test test/unit.mjs`).
+
 `test/check.mjs` is a dev-only Playwright script and not a dependency of the app. Install Playwright in a scratch directory outside the repo and run:
 
 ```

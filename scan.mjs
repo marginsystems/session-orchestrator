@@ -96,7 +96,7 @@ function analyzeFile(path, size) {
   const tail = readTail(path, size);
   let cwd = lastCwd(tail);
   if (!cwd) cwd = lastCwd(readRange(path, 0, Math.min(size, HEAD_BYTES)));
-  let last = null;
+  let last;
   const messages = [];
   const prompts = [];
   const seen = new Set();
@@ -135,7 +135,7 @@ function analyzeFile(path, size) {
       last = { kind: blocks.some((b) => b && b.type === 'tool_result') ? 'tool_result' : 'prompt' };
     }
   }
-  return { cwd, last, messages, prompts };
+  return { cwd, last: last ?? null, messages, prompts };
 }
 
 const fileCache = new Map();
@@ -218,8 +218,9 @@ function roomLabel(root) {
 }
 
 
-const DEFAULT_SETTINGS = { order: [], anonymize: false, titles: false, speed: 1, sound: false, onboardedAt: null };
+const DEFAULT_SETTINGS = { order: new Array(), anonymize: false, titles: false, speed: 1, sound: false, onboardedAt: null };
 const SETTING_KEYS = Object.keys(DEFAULT_SETTINGS);
+// eslint-disable-next-line no-control-regex
 const ORDER_ITEM_RE = /^[^\u0000-\u001f<>]{1,64}$/;
 
 function validateSettings(input) {
@@ -244,6 +245,20 @@ function validateSettings(input) {
     }
   }
   return { value: out };
+}
+
+function readFocus(now, desktop, byUuid) {
+  try {
+    const f = JSON.parse(readFileSync(FOCUS_FILE, 'utf8'));
+    const at = Date.parse(f.at);
+    const sid = typeof f.sessionId === 'string' ? f.sessionId : '';
+    if (sid && Number.isFinite(at) && at <= now && now - at < FOCUS_MAX_MS) {
+      const uuid = sid.startsWith('local_') ? (desktop.get(sid) || {}).cli : sid;
+      const target = uuid && byUuid.get(uuid);
+      return { agentId: target ? target.id : 'visitor', at };
+    }
+  } catch {}
+  return null;
 }
 
 function loadSettings() {
@@ -386,17 +401,7 @@ function scan(now = Date.now()) {
   }
   events.sort((a, b) => a.at - b.at);
 
-  let focus = null;
-  try {
-    const f = JSON.parse(readFileSync(FOCUS_FILE, 'utf8'));
-    const at = Date.parse(f.at);
-    const sid = typeof f.sessionId === 'string' ? f.sessionId : '';
-    if (sid && Number.isFinite(at) && at <= now && now - at < FOCUS_MAX_MS) {
-      const uuid = sid.startsWith('local_') ? (desktop.get(sid) || {}).cli : sid;
-      const target = uuid && byUuid.get(uuid);
-      focus = { agentId: target ? target.id : 'visitor', at };
-    }
-  } catch {}
+  const focus = readFocus(now, desktop, byUuid);
 
   const ordered = [...rooms.values()].sort((a, b) => {
     const ra = priorityRank(a), rb = priorityRank(b);
@@ -410,7 +415,7 @@ function scan(now = Date.now()) {
   }));
   const queue = agents
     .filter((x) => x.state === 'waiting')
-    .sort((a, b) => rankOfRoom.get(a.s.room.id) - rankOfRoom.get(b.s.room.id) || a.s.mtime - b.s.mtime)
+    .sort((a, b) => (rankOfRoom.get(a.s.room.id) ?? 0) - (rankOfRoom.get(b.s.room.id) ?? 0) || a.s.mtime - b.s.mtime)
     .map((x) => x.agent.id);
 
   return { generatedAt: now, rooms: outRooms, agents: agents.map((a) => a.agent), events, focus, queue };
@@ -558,7 +563,7 @@ const server = createServer((req, res) => {
 });
 
 server.on('error', (e) => {
-  console.error(e.code === 'EADDRINUSE' ? `port ${OPTS.port} is in use, try --port <n>` : String(e.message));
+  console.error(e instanceof Error && 'code' in e && e.code === 'EADDRINUSE' ? `port ${OPTS.port} is in use, try --port <n>` : String(e.message));
   process.exit(1);
 });
 server.listen(OPTS.port, '127.0.0.1', () => {

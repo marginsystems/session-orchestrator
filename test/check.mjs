@@ -503,8 +503,8 @@ if (want('unit')) {
   console.log('unit ok', cases.length, 'cases');
 }
 
-let fixtureHome = null;
-let fixture = null;
+let fixtureHome;
+let fixture;
 const SPORT = 7791;
 
 if (want('server')) {
@@ -525,13 +525,13 @@ if (want('server')) {
   const defaults = JSON.parse((await httpReq(SPORT, { path: '/settings' })).text);
   check(defaults.order.length === 0 && defaults.onboardedAt === null && defaults.speed === 1, 'default settings wrong');
 
-  let r = await post({ order: [s.rooms.find((x) => x.label === 'citadel').id, 'beacon'] });
+  const r = await post({ order: [s.rooms.find((x) => x.label === 'citadel').id, 'beacon'] });
   check(r.status === 200, `valid order post rejected ${r.status} ${r.text}`);
   s = await stateOf(SPORT);
   check(s.rooms.map((x) => x.label).join() === 'citadel,beacon,atlas,delta', `priority not applied to rooms: ${s.rooms.map((x) => x.label)}`);
   const expectOrdered = [ids.citadel240, ids.beacon380, ids.beacon200, ids.atlas300, ids.delta400];
   check(JSON.stringify(s.queue) === JSON.stringify(expectOrdered), `queue not ordered by floor priority then wait: ${JSON.stringify(s.queue)}`);
-  r = await post({ anonymize: true });
+  await post({ anonymize: true });
   s = await stateOf(SPORT);
   check(s.rooms.map((x) => x.label).join() === 'Room A,Room B,Room C,Room D', `anonymize not applied: ${s.rooms.map((x) => x.label)}`);
   check(!JSON.stringify(s).includes('citadel'), 'anonymized state still names projects');
@@ -598,8 +598,8 @@ if (want('server')) {
   s = await waitState(SPORT, (st) => st.events.some((e) => e.kind === 'join'));
   const joins = s.events.filter((e) => e.kind === 'join');
   check(joins.length === 1 && joins[0].agentId === agentId(echoUuid), `join events wrong: ${JSON.stringify(joins)}`);
-  check(s.rooms.some((r) => r.label === 'echo'), 'new project missing from rooms');
-  check(s.rooms.map((r) => r.label).slice(0, 3).join() === 'citadel,beacon,echo', `new project not placed after the listed floors by activity: ${s.rooms.map((r) => r.label)}`);
+  check(s.rooms.some((room) => room.label === 'echo'), 'new project missing from rooms');
+  check(s.rooms.map((room) => room.label).slice(0, 3).join() === 'citadel,beacon,echo', `new project not placed after the listed floors by activity: ${s.rooms.map((room) => room.label)}`);
   const focusDir = join(fixtureHome, '.session-orchestrator');
   writeFileSync(join(focusDir, 'focus.json'), JSON.stringify({ sessionId: fixture.find((f) => f.project === 'beacon' && f.ageSec === 200).uuid, at: nowIso() }));
   s = await waitState(SPORT, (st) => st.focus && st.focus.agentId);
@@ -636,7 +636,7 @@ if (want('live')) {
     await sleep(500);
     await page.click('#gear');
     await sleep(400);
-    let u = await boxChecks(page, 'live', 'settings');
+    const u = await boxChecks(page, 'live', 'settings');
     check(u.settings && u.geo && u.geo.n === 4, 'settings panel did not open with four floors');
     const downs = page.locator('[data-kind="down"]');
     await downs.first().click();
@@ -793,7 +793,7 @@ async function runUi(vw, vh, dpr, tag) {
     await ctx.close();
   }
   {
-    const { ctx, page, errors } = await open(vw, vh, dpr, `file://${ROOT}/index.html?demo=1&seed=3&speed=3&sim=0&onboarding=1`, 1200);
+    const { ctx, page } = await open(vw, vh, dpr, `file://${ROOT}/index.html?demo=1&seed=3&speed=3&sim=0&onboarding=1`, 1200);
     check(!!(await uiState(page)).tour, `${tag} ?onboarding=1 did not force the tour`);
     await page.locator('[data-id="skip"]').click();
     await sleep(300);
@@ -808,7 +808,7 @@ async function runUi(vw, vh, dpr, tag) {
     check(!(await uiState(page)).tour, `${tag} onboarding=0 still showed the tour`);
     await page.locator('#gear').click();
     await sleep(300);
-    let u = await boxChecks(page, tag, 'settings');
+    const u = await boxChecks(page, tag, 'settings');
     check(u.settings && u.geo.n === 4, `${tag} settings did not list four floors`);
     await page.screenshot({ path: join(SHOTS, `${tag}-settings.png`) });
     const start = await ev(page, () => window.__office.rooms().map((r) => r.id));
@@ -831,7 +831,7 @@ async function runUi(vw, vh, dpr, tag) {
     check(floors.join() === now.join(), `${tag} floors not stacked in priority order`);
     const stored = await ev(page, () => window.__office.settings().order);
     check(stored.join() === now.join(), `${tag} settings order ${stored} != floors ${now}`);
-    u = await boxChecks(page, tag, 'settings after reorder');
+    await boxChecks(page, tag, 'settings after reorder');
     await page.locator('[data-id="tg:anonymize"]').click();
     await sleep(300);
     check((await ev(page, () => window.__office.rooms().map((r) => r.label))).join() === 'Room A,Room B,Room C,Room D', `${tag} demo anonymize failed`);
