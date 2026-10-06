@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { isHumanPrompt } from './lib/prompts.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
+const PAGE_SCRIPT = /^\/office\/[a-z]+\.js$/;
 const argv = process.argv.slice(2);
 const flag = (n) => argv.includes(n);
 const opt = (n, d) => {
@@ -562,6 +563,14 @@ const server = createServer((req, res) => {
       res.end(html);
     } catch {
       res.writeHead(500, headers).end();
+    }
+  } else if (PAGE_SCRIPT.test(path)) {
+    try {
+      const js = readFileSync(join(HERE, path.slice(1)));
+      res.writeHead(200, { ...headers, 'content-type': 'text/javascript; charset=utf-8' });
+      res.end(js);
+    } catch {
+      res.writeHead(404, headers).end();
     }
   } else {
     res.writeHead(404, headers).end();

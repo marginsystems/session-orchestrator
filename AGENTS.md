@@ -10,7 +10,7 @@ Lint and type directives (`eslint-disable`, `@ts-check`, `@ts-expect-error`), a 
 
 ## Zero runtime dependencies
 
-The app (`scan.mjs`, `lib/`, `index.html` and the future page scripts) imports only `node:` built-ins and loads no external resource: no CDN, no font, no analytics.
+The app (`scan.mjs`, `lib/`, `index.html` and `office/*.js`) imports only `node:` built-ins and loads no external resource: no CDN, no font, no analytics.
 
 `devDependencies` in `package.json` are for tooling only. Never add Playwright to `package.json`; `test/check.mjs` loads it from `PW_DIR`, outside the repo.
 
@@ -22,7 +22,7 @@ Never commit, and never put in an issue or PR: real paths, user names, session i
 
 ## The demo works from disk
 
-`index.html?demo=1` must keep working when opened from disk (`file://`). Page code uses classic scripts, not ES modules.
+`index.html?demo=1` must keep working when opened from disk (`file://`). Page code uses classic scripts, not ES modules: it lives in `office/*.js`, loaded in order by `index.html`. Keep each file under 800 lines.
 
 ## Every PR has a GitHub issue first
 

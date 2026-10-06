@@ -33,7 +33,7 @@ const sharedRules = {
 };
 
 export default [
-  { ignores: ['node_modules/**', 'index.html'] },
+  { ignores: ['node_modules/**'] },
   js.configs.recommended,
   {
     files: ['**/*.mjs', '**/*.js'],
@@ -41,16 +41,21 @@ export default [
     rules: sharedRules,
   },
   {
-    files: ['scan.mjs', 'lib/**/*.mjs', 'test/**/*.mjs', 'scripts/**/*.mjs', 'eslint.config.js'],
+    files: ['scan.mjs', 'lib/**/*.mjs', 'test/**/*.mjs', 'scripts/**/*.mjs', 'office/**/*.js', 'eslint.config.js'],
     plugins: { local },
     rules: { 'local/no-comments': 'error' },
+  },
+  {
+    files: ['office/**/*.js'],
+    languageOptions: { sourceType: 'script', globals: { ...globals.browser } },
+    rules: { 'no-undef': 'off', 'no-implicit-globals': 'off', 'no-unused-vars': ['error', { vars: 'local' }] },
   },
   {
     files: ['test/**/*.mjs'],
     languageOptions: { globals: { ...globals.node, ...globals.browser } },
   },
   {
-    files: ['scan.mjs', 'lib/**/*.mjs', 'scripts/**/*.mjs'],
+    files: ['scan.mjs', 'lib/**/*.mjs', 'scripts/**/*.mjs', 'office/**/*.js'],
     rules: { 'max-lines': ['error', { max: 800, skipBlankLines: true }] },
   },
 ];

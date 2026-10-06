@@ -135,9 +135,25 @@ For each transcript in `~/.claude/projects/<slug>/<uuid>.jsonl` modified in the 
 - The office is a browser tab on `127.0.0.1:7777`; `/office` always uses that port. There is no in-app pane yet.
 - No sound yet.
 
+## Code layout
+
+`scan.mjs` is the server and `lib/` holds its helpers. `index.html` holds the markup and styles; the page code lives in `office/*.js`, classic scripts loaded in this order:
+
+- `base.js`: query params, constants, palette, math and random helpers, pixel fonts and text drawing.
+- `sprites.js`: critter sprite data and the head and body canvases.
+- `props.js`: windows, furniture and desk drawing.
+- `building.js`: state, layout, floors, walls, labels, static layers and the floor animation.
+- `actors.js`: the task system, walking, elevator, trips, boss visits, focus, queue and join or leave.
+- `render.js`: per-frame drawing of agents, bubbles, the elevator cab and effects.
+- `data.js`: applying server state, polling, settings load and save.
+- `demo.js`: the scripted demo.
+- `ui.js`: settings panel, hit buttons, drag and keyboard.
+- `tour.js`: the onboarding tour.
+- `main.js`: boot, the frame loop and the `window.__office` test hook.
+
 ## Tests
 
-The app itself has no runtime dependencies. `npm install` installs dev tools only (ESLint and TypeScript); `npm run check` runs lint, typecheck and the dependency-free unit tests (`node --test test/unit.mjs`).
+The app itself has no runtime dependencies. `npm install` installs dev tools only (ESLint and TypeScript); `npm run check` runs lint, typecheck (the server and the page scripts) and the dependency-free unit tests (`node --test test/unit.mjs`).
 
 `test/check.mjs` is a dev-only Playwright script and not a dependency of the app. Install Playwright in a scratch directory outside the repo and run:
 
