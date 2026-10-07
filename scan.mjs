@@ -223,7 +223,6 @@ function desktopSessions() {
           desktopCache.set(p, rec);
         }
         if (rec.local && rec.cli) out.set(rec.local, rec);
-        else complete = false;
       }
     }
   }
