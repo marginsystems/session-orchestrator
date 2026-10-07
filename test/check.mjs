@@ -1849,6 +1849,18 @@ async function runNoFlash() {
   await ctx.close();
 }
 add('no flash', ['ui'], () => runNoFlash(), true);
+add('own clocks', ['ui'], async () => {
+  const { ctx, page, errors } = await open(1280, 720, 1, demoUrl('seed=3'));
+  const pairs = await page.evaluate(() => [window.__office.clocks(100), window.__office.clocks(160)]);
+  const rates = pairs[0].map((c, i) => (pairs[1][i].at - c.at) / 60);
+  const phases = pairs[0].map((c) => c.at % 4);
+  const spread = (xs) => Math.max(...xs) - Math.min(...xs);
+  check(pairs[0].length >= 6, `own clocks: only ${pairs[0].length} agents`);
+  check(new Set(rates.map((r) => r.toFixed(3))).size >= pairs[0].length - 1 && spread(rates) > 0.1, `agents share an animation tempo: ${rates.map((r) => r.toFixed(3))}`);
+  check(spread(phases) > 1.5, `agent animation phases are bunched: ${phases.map((p) => p.toFixed(2))}`);
+  check(errors.length === 0, `own clocks console errors ${errors.join('|')}`);
+  await ctx.close();
+}, true);
 for (const dpr of [1, 2]) for (const [w, h] of [[1280, 720], [390, 844]]) add(`rows ${w}x${dpr}`, ['ui', 'rows'], () => rowsRun(w, h, dpr, `r${w}x${dpr}`), dpr === 1 && w === 390);
 for (const [w, h] of [[1280, 720], [390, 844]]) add(`rows cooler ${w}`, ['ui', 'rows', 'cooler'], () => rowsCoolerRun(w, h, `rc${w}`), w === 1280);
 for (const dpr of [1, 2]) for (const [w, h] of SIZES) add(`names ${w}x${dpr}`, ['ui'], () => runNames(w, h, dpr, `n${w}x${dpr}`), dpr === 1 && w === 1280);

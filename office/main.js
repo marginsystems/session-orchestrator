@@ -73,6 +73,7 @@ window['__office'] = {
   rooms: () => S.rooms.map((r) => ({ id: r.id, label: r.label, offAir: r.offAir })),
   load: (st) => { applyState(st); return true; },
   layouts: () => S.layouts,
+  clocks: (t) => [...S.agents.values()].map((a) => ({ id: a.id, at: ownTime(a, t) })),
   fold: (t) => fold(t),
   sign: () => ({ x: BM + 3, max: LABT, inner: LABW - 2 }),
   settings: () => ({ ...S.set }),

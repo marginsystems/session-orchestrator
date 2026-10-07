@@ -73,11 +73,13 @@ const drawSeated = function (a, t, x, fy, st, o) {
   } else if (!a.boss) { ctx.fillStyle = '#f4f4f4'; ctx.fillRect(x + 30, fy - 14, 3, 3); ctx.fillStyle = '#566c86'; ctx.fillRect(x + 33, fy - 13, 1, 1); ctx.fillStyle = '#c4915a'; ctx.fillRect(x + 30, fy - 14, 3, 1); }
 };
 
+const ownTime = (a, t) => t * (0.82 + (hn(a.seed) % 360) / 1000) + (hn(a.seed ^ 0x5bd1) % 10000) / 997;
+
 const drawAgent = function (a, t) {
   if (a.alpha <= 0.05) return;
   const g = ctx.globalAlpha;
   ctx.globalAlpha = g * a.alpha;
-  try { drawAgentBody(a, t); } finally { ctx.globalAlpha = g; }
+  try { drawAgentBody(a, ownTime(a, t)); } finally { ctx.globalAlpha = g; }
 };
 
 const drawAgentBody = function (a, t) {
@@ -175,7 +177,7 @@ const drawGuests = function (t) {
     if (id !== null) return;
     let g = guestStyles.get(k);
     if (!g) { g = { st: styleFor('guest' + k), seed: hash('guest' + k) }; guestStyles.set(k, g); }
-    drawWaiter({ x: lineX(k), st: g.st, seed: g.seed }, t, BH.moods.get('g' + k));
+    drawWaiter({ x: lineX(k), st: g.st, seed: g.seed }, ownTime(g, t), BH.moods.get('g' + k));
   });
 };
 
@@ -326,7 +328,7 @@ const draw = function (t) {
   S.dim += ((NIGHT || (S.total > 0 && S.working / S.total <= 0.1) ? 1 : 0) - S.dim) * Math.min(1, S.dt * 0.8);
   for (const [rid, arr] of S.slots) {
     if (!S.floors.includes(rid)) continue;
-    arr.forEach((aid, k) => { const a = aid && S.agents.get(aid); if (a && !a.joining) drawScreen(slotX(rid, k), deskFoot(rid, k), a, t); });
+    arr.forEach((aid, k) => { const a = aid && S.agents.get(aid); if (a && !a.joining) drawScreen(slotX(rid, k), deskFoot(rid, k), a, ownTime(a, t)); });
   }
   drawDrops();
   drawBossScreens(t);
@@ -345,8 +347,8 @@ const draw = function (t) {
     const x = Math.round(a.x);
     if (!a.away) {
       const fy = yOf(a);
-      if (a.state === 'waiting' && a.sit > 0.99 && !a.bubble) thought(t, x, fy);
-      if ((a.sleepy || napping(a)) && a.state === 'idle' && a.sit > 0.99) zees(t, x, fy);
+      if (a.state === 'waiting' && a.sit > 0.99 && !a.bubble) thought(ownTime(a, t), x, fy);
+      if ((a.sleepy || napping(a)) && a.state === 'idle' && a.sit > 0.99) zees(ownTime(a, t), x, fy);
       if (a.react > 0 && S.t - a.react < 1.1 && a.sit > 0.99) bang(x + 1, fy - 33);
     } else if (a.react > 0 && S.t - a.react < 1.1) bang(x, yOf(a) - 24);
   }
