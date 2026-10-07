@@ -27,7 +27,7 @@ const SEC = { t0: -9, fake: { seed: 5, state: 'working', hop: 0, react: -9, slee
 
 const newAnim = (t0, from, slide, out, keepH) => ({ t0, dur: out.length ? 0.9 : 0.8, from: new Map(from.map((id, i) => [id, i])), p: 0, pf: 0, ps: 0, slide, out, keepH });
 
-const S = { rooms: TYPE_ONLY ? [{ id: '', label: '' }] : [], floors: [BOSS, LOBBY], agents: new Map(TYPE_ONLY ? [['', B]] : []), slots: new Map(TYPE_ONLY ? [['', ['']]] : []), Hf: 70, s: 2, dpr: 1, LW: 380, LH: 300, t: 0, dt: 0.07, dim: 0, sig: '', tasks: TYPE_ONLY ? [{ gen: wait(0), done: false }] : [], vid: 0, sky: 'day', counts: { working: 0, waiting: 0, idle: 0 }, msg: '', focus: TYPE_ONLY ? { token: '', agentId: '' } : null, frames: 0, dyn: { coffees: TYPE_ONLY ? [{ id: '', x: 0, dy: 0 }] : [], props: TYPE_ONLY ? [{ id: '', kind: '', x: 0, cell: 0 }] : [] }, set: { ...DEF_SET }, last: TYPE_ONLY ? { rooms: [{ id: '', label: '' }] } : null, queue: TYPE_ONLY ? [''] : [], queueSize: 0, line: TYPE_ONLY ? ['', null] : [], want: TYPE_ONLY ? [''] : [], anim: TYPE_ONLY ? newAnim(0, [], [], [], 0) : null, fc: TYPE_ONLY ? new Map([['', stCv]]) : null, bgCv: TYPE_ONLY ? stCv : null, posting: 0, wall: new Map(), visits: TYPE_ONLY ? [''] : [], visitTarget: '', visitLog: TYPE_ONLY ? [{ id: '', agentAway: false, agentBubble: false, answered: false }] : [], drops: new Map(), puffs: TYPE_ONLY ? [{ x: 0, y: 0, t0: 0 }] : [], joined: new Set(), firstApplied: false, gotState: false, setReady: false, particles: TYPE_ONLY ? [{ x: 0, y: 0, vx: 0, vy: 0, col: '', life: 0, sz: 0 }] : [] };
+const S = { rooms: TYPE_ONLY ? [{ id: '', label: '' }] : [], floors: [BOSS, LOBBY], agents: new Map(TYPE_ONLY ? [['', B]] : []), slots: new Map(TYPE_ONLY ? [['', ['']]] : []), Hf: 70, s: 2, dpr: 1, LW: 380, LH: 300, t: 0, dt: 0.07, dim: 0, sig: '', tally: '', layouts: 0, tasks: TYPE_ONLY ? [{ gen: wait(0), done: false }] : [], vid: 0, sky: 'day', counts: { working: 0, waiting: 0, idle: 0 }, msg: '', focus: TYPE_ONLY ? { token: '', agentId: '' } : null, frames: 0, dyn: { coffees: TYPE_ONLY ? [{ id: '', x: 0, dy: 0 }] : [], props: TYPE_ONLY ? [{ id: '', kind: '', x: 0, cell: 0 }] : [] }, set: { ...DEF_SET }, last: TYPE_ONLY ? { rooms: [{ id: '', label: '' }] } : null, queue: TYPE_ONLY ? [''] : [], queueSize: 0, line: TYPE_ONLY ? ['', null] : [], want: TYPE_ONLY ? [''] : [], anim: TYPE_ONLY ? newAnim(0, [], [], [], 0) : null, fc: TYPE_ONLY ? new Map([['', stCv]]) : null, bgCv: TYPE_ONLY ? stCv : null, posting: 0, wall: new Map(), visits: TYPE_ONLY ? [''] : [], visitTarget: '', visitLog: TYPE_ONLY ? [{ id: '', agentAway: false, agentBubble: false, answered: false }] : [], drops: new Map(), puffs: TYPE_ONLY ? [{ x: 0, y: 0, t0: 0 }] : [], joined: new Set(), firstApplied: false, gotState: false, setReady: false, particles: TYPE_ONLY ? [{ x: 0, y: 0, vx: 0, vy: 0, col: '', life: 0, sz: 0 }] : [] };
 const E = { fy: 0, open: 0, moving: false, queue: TYPE_ONLY ? [{ a: B, fromRoom: '', toRoom: '', state: '' }] : [], rider: TYPE_ONLY ? B : null, use: new Map(), ding: TYPE_ONLY ? { f: 0, t0: 0 } : null };
 
 const T0 = () => (HUD ? HUDH : 0) + ROOFH;
@@ -85,9 +85,11 @@ const measure = function () {
 };
 
 const layout = function () {
+  S.layouts++;
   S.anim = null; S.fc = null; S.bgCv = null; E.fid = null;
   measure();
-  cv.width = S.LW; cv.height = S.LH; stCv.width = S.LW; stCv.height = S.LH;
+  if (cv.width !== S.LW || cv.height !== S.LH) { cv.width = S.LW; cv.height = S.LH; }
+  if (stCv.width !== S.LW || stCv.height !== S.LH) { stCv.width = S.LW; stCv.height = S.LH; }
   cv.style.width = (S.LW * S.s / S.dpr) + 'px'; cv.style.height = (S.LH * S.s / S.dpr) + 'px';
   ctx.imageSmoothingEnabled = false; stC.imageSmoothingEnabled = false;
   S.ready = true;
@@ -96,6 +98,7 @@ const layout = function () {
   drawStatic();
   placeGear();
   uiMeasure();
+  if (S.gotState) draw(S.t);
 };
 
 const assignWalls = function () {
@@ -298,4 +301,5 @@ const beginAnim = function (old, added, ghosts, oldLH) {
   S.animCount = (S.animCount || 0) + 1;
   const out = (ghosts || []).map((g) => ({ i: g.i, cv: ghostCanvas(g) }));
   S.anim = newAnim(S.t, old, slide, out, keepH);
+  draw(S.t);
 };

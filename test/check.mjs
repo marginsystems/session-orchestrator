@@ -1518,6 +1518,32 @@ add('behavior b0', ['behavior', 'ui'], () => behaviorRun(1280, 720, 'b0', 0, fal
 add('cooler c1280', ['behavior', 'ui', 'cooler'], () => coolerRun(1280, 720, 'c1280', 3, true), true);
 add('cooler c390', ['behavior', 'ui', 'cooler'], () => coolerRun(390, 844, 'c390', 3, true));
 add('cooler c0', ['behavior', 'ui', 'cooler'], () => coolerRun(1280, 720, 'c0', 0, false), true);
+async function runNoFlash() {
+  const { ctx, page, errors } = await open(1280, 720, 1, `file://${ROOT}/index.html?onboarding=0`);
+  const rooms = [{ id: 'f1', label: 'alpha' }, { id: 'f2', label: 'beta' }];
+  const mk = (states) => ({ rooms, agents: states.map((state, i) => ({ id: 'fa' + i, name: 'Fern ' + i, room: rooms[i % 2].id, state })), events: [], generatedAt: Date.now() });
+  await page.evaluate((st) => window.__office.load(st), mk(['idle', 'working', 'idle', 'working']));
+  await page.evaluate(() => window.__office.advance(1));
+  const before = await page.evaluate(() => window.__office.layouts());
+  const blank = [];
+  for (const states of [['working', 'working', 'idle', 'working'], ['idle', 'idle', 'idle', 'working'], ['working', 'idle', 'working', 'idle']]) {
+    blank.push(await page.evaluate((st) => {
+      window.__office.load(st);
+      const c = document.getElementById('cv');
+      const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+      let lit = 0;
+      for (let i = 3; i < d.length; i += 4 * 97) if (d[i] > 0) lit++;
+      return lit;
+    }, mk(states)));
+  }
+  const after = await page.evaluate(() => window.__office.layouts());
+  check(after === before, `state-only changes rebuilt the layout ${after - before} times`);
+  check(blank.every((n) => n > 100), `canvas went blank right after a state change: ${blank}`);
+  const real = errors.filter((e) => !e.includes('willReadFrequently'));
+  check(real.length === 0, `no-flash console errors ${real.join('|')}`);
+  await ctx.close();
+}
+add('no flash', ['ui'], () => runNoFlash(), true);
 for (const dpr of [1, 2]) for (const [w, h] of SIZES) add(`names ${w}x${dpr}`, ['ui'], () => runNames(w, h, dpr, `n${w}x${dpr}`), dpr === 1 && w === 1280);
 for (const dpr of [1, 2]) for (const [w, h] of SIZES) add(`ui ${w}x${dpr}`, ['ui'], () => runUi(w, h, dpr, `u${w}x${dpr}`), dpr === 1 && w === 1280);
 

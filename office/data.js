@@ -86,12 +86,16 @@ const applyState = function (raw) {
   S.counts = c;
   S.msg = '';
   statEl.textContent = `${c.working} working, ${c.waiting} waiting, ${c.idle} idle (${DEMO ? 'demo' : 'live'})`;
-  const sig = S.rooms.map((r) => r.id + r.label + (slots.get(r.id) || []).map((id) => { const a = id && S.agents.get(id); return a ? a.name : '-'; }).join(',')).join('|') + `:${c.working}:${c.waiting}:${c.idle}`;
+  const sig = S.rooms.map((r) => r.id + r.label + (slots.get(r.id) || []).map((id) => { const a = id && S.agents.get(id); return a ? a.name : '-'; }).join(',')).join('|');
+  const tally = `${c.working}:${c.waiting}:${c.idle}`;
   const changed = sig !== S.sig;
+  const recount = tally !== S.tally;
   S.sig = sig;
+  S.tally = tally;
   S.working = c.working + c.waiting;
   S.total = list.length;
-  if (changed || !S.ready) layout(); else snapSeated();
+  if (changed || !S.ready) layout();
+  else { snapSeated(); if (recount) drawStatic(); }
   if (reorder) beginAnim(oldFloors, added, ghosts, oldLH);
   for (const a of joiners) spawn(joinTask(a));
   leavers.forEach((a, k) => spawn(k < 3 ? leaveTask(a) : fadeTask(a)));
