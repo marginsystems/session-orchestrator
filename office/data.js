@@ -69,6 +69,7 @@ const applyState = function (raw) {
   S.floors = [BOSS, ...S.rooms.map((r) => r.id), LOBBY];
   assignWalls();
   S.queue = (s.queue || []).slice();
+  S.queueSize = typeof s.queueSize === 'number' ? s.queueSize : S.queue.length;
   const added = S.floors.filter((id) => !oldFloors.includes(id));
   const removed = oldFloors.filter((id) => !S.floors.includes(id));
   const moved = S.floors.some((id) => oldFloors.includes(id) && oldFloors.indexOf(id) !== S.floors.indexOf(id));

@@ -169,6 +169,12 @@ const drawDrops = function () {
   }
 };
 
+const queueExtra = function () {
+  const fid = S.focus && S.focus.agentId;
+  const onScreen = S.queue.filter((id) => id !== fid).length;
+  return Math.max(0, onScreen - S.want.length) + Math.max(0, S.queueSize - S.queue.length);
+};
+
 const drawQueueMarks = function () {
   const fy = footY(fIdx(BOSS));
   S.want.forEach((id, k) => {
@@ -178,12 +184,11 @@ const drawQueueMarks = function () {
     text(ctx, t, x + 1, y + 1, '#1a1c2c');
     text(ctx, t, x, y, k === 0 ? '#ffcd75' : '#f4f4f4');
   });
-  const fid = S.focus && S.focus.agentId;
-  const extra = S.queue.filter((id) => !S.want.includes(id) && id !== fid).length;
+  const extra = queueExtra();
   if (extra > 0) {
-    const t = '+' + extra, x = doorX() + hallW() - 4 - textW(t), y = floorTop(fIdx(BOSS)) + 26;
-    text(ctx, t, x + 1, y + 1, '#1a1c2c');
-    text(ctx, t, x, y, '#ef7d57');
+    const t = '+' + extra + ' MORE', x = doorX() + hallW() - 5 - textW(t), y = floorTop(fIdx(BOSS)) + 26;
+    R(ctx, x - 2, y - 2, textW(t) + 4, 11, '#1a1c2c');
+    text(ctx, t, x, y, '#ffcd75');
   }
 };
 

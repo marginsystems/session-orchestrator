@@ -302,15 +302,16 @@ function readQueue(now, desktop) {
   try {
     const f = JSON.parse(readFileSync(QUEUE_FILE, 'utf8'));
     const at = Date.parse(f.at);
-    if (!Number.isFinite(at) || at > now + 60000 || now - at >= FOCUS_MAX_MS || !Array.isArray(f.items)) return [];
-    const out = [];
-    for (const it of f.items.slice(0, QUEUE_MAX)) {
+    if (!Number.isFinite(at) || at > now + 60000 || now - at >= FOCUS_MAX_MS || !Array.isArray(f.items)) return { uuids: [], size: 0 };
+    const items = f.items.slice(0, QUEUE_MAX);
+    const uuids = [];
+    for (const it of items) {
       const uuid = toUuid(typeof it === 'string' ? it : it && it.sessionId, desktop);
-      if (uuid && !out.includes(uuid)) out.push(uuid);
+      if (uuid && !uuids.includes(uuid)) uuids.push(uuid);
     }
-    return out;
+    return { uuids, size: items.length };
   } catch {
-    return [];
+    return { uuids: [], size: 0 };
   }
 }
 
@@ -397,7 +398,8 @@ function scan(now = Date.now()) {
 
   const rooms = new Map();
   const picked = [];
-  const queued = readQueue(now, desktop);
+  const queueFile = readQueue(now, desktop);
+  const queued = queueFile.uuids;
   const queuedSet = new Set(queued);
   const first = [focusUuid, ...queued].map((u) => found.find((s) => s.uuid === u)).filter((s) => s !== undefined);
   const candidates = [...new Set([...first, ...found])];
@@ -476,7 +478,7 @@ function scan(now = Date.now()) {
   const foundUuids = new Set(found.map((s) => s.uuid));
   const queue = queued.filter((u) => foundUuids.has(u)).map((u) => byUuid.get(u)?.id || 'a' + sha(u).slice(0, 8));
 
-  return { generatedAt: now, rooms: outRooms, agents: agents.map((a) => a.agent), events, focus, queue };
+  return { generatedAt: now, rooms: outRooms, agents: agents.map((a) => a.agent), events, focus, queue, queueSize: queueFile.size };
 }
 
 function counts(snap) {

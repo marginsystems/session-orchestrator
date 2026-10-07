@@ -54,7 +54,7 @@ window['__office'] = {
   secretary: () => ({ x: secX(), waving: S.t - SEC.t0 < 1.4 }),
   trip: (fromId, toId, text) => startTrip(fromId, toId || '', text || TEXTS[0]),
   dim: () => S.dim,
-  queue: () => ({ queue: S.queue.slice(), want: S.want.slice(), cap: lineCap(), door: doorX(), hall: hallW(), spots: S.want.map((id, k) => lineX(k)), foot: footY(0), spot: bossSpot() }),
+  queue: () => ({ queue: S.queue.slice(), size: S.queueSize, extra: queueExtra(), want: S.want.slice(), cap: lineCap(), door: doorX(), hall: hallW(), spots: S.want.map((id, k) => lineX(k)), foot: footY(0), spot: bossSpot() }),
   rooms: () => S.rooms.map((r) => ({ id: r.id, label: r.label })),
   load: (st) => { applyState(st); return true; },
   fold: (t) => fold(t),

@@ -580,6 +580,7 @@ if (want('server')) {
   check(!s.events.some((e) => e.kind === 'join'), 'server emitted join events for sessions that existed at startup');
   const expectDefault = [ids.atlas300, ids.delta400, ids.beacon380, ids.beacon200, ids.citadel240];
   check(JSON.stringify(s.queue) === JSON.stringify(expectDefault), `server default queue ${JSON.stringify(s.queue)} != ${JSON.stringify(expectDefault)}`);
+  check(s.queueSize === 6, `queueSize ${s.queueSize} is not the number of items in queue.json`);
   const raw = JSON.stringify(s);
   check(!raw.includes('/work') && !raw.includes(fixtureHome) && !/"title"/.test(raw), 'state.json leaks paths or titles by default');
   const ok = { origin: `http://127.0.0.1:${SPORT}`, 'content-type': 'application/json' };
@@ -773,6 +774,7 @@ if (want('live')) {
     const expect = [ids.atlas300, ids.delta400, ids.beacon380, ids.beacon200, ids.citadel240].filter((id) => q.queue.includes(id));
     check(JSON.stringify(q.queue) === JSON.stringify(expect), `browser queue ${JSON.stringify(q.queue)} != ${JSON.stringify(expect)}`);
     check(q.want.length === Math.min(q.cap, q.queue.length), `queue seats ${q.want.length} vs capacity ${q.cap}`);
+    check(q.size === 6 && q.extra === q.queue.length - q.want.length + 1, `waiting room overflow count ${q.extra} for ${q.queue.length} queued, ${q.want.length} seated, ${q.size} items`);
     check(JSON.stringify(q.want) === JSON.stringify(expect.slice(0, q.want.length)), `waiting room order ${JSON.stringify(q.want)} differs from fixture queue ${JSON.stringify(expect)}`);
     await queueSeatCheck(page, 'live');
     await page.screenshot({ path: join(SHOTS, 'live-queue.png') });

@@ -104,7 +104,7 @@ The waiting room is the orchestrator's queue. The orchestrator writes it to `~/.
 {"at": "2026-10-06T12:00:00Z", "items": [{"sessionId": "local_..."}, {"sessionId": null}]}
 ```
 
-Every queued session stands in the waiting room in that order, front first; items without a session are skipped. `scan.mjs` only reads the file. A missing file or one older than 24 hours means an empty waiting room. `state.json` lists the queued agents in `queue`.
+Every queued session stands in the waiting room in that order, front first; items without a session are skipped. `scan.mjs` only reads the file. A missing file or one older than 24 hours means an empty waiting room. `state.json` lists the queued agents in `queue` and the total number of items in `queue.json`, including items without a session, in `queueSize`.
 
 ## state.json
 
@@ -117,7 +117,8 @@ Every queued session stands in the waiting room in that order, front first; item
          | {id, kind: "boss_visit", at, to}
          | {id, kind: "join", at, agentId}],
   focus:  {agentId, at} | null,
-  queue:  [agentId, ...]
+  queue:  [agentId, ...],
+  queueSize: number
 }
 ```
 
