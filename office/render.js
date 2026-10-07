@@ -303,6 +303,16 @@ const drawCab = function (t) {
   }
 };
 
+const drawLobbyDoor = function () {
+  if (!S.floors.includes(LOBBY)) return;
+  const fy = topNow(LOBBY) + S.Hf - FB, x = BM + 6, w = 16, h = 30, y = fy - h;
+  R(ctx, x, y, w, h, S.sky === 'night' ? '8' : S.sky === 'dusk' ? '3' : 'b');
+  R(ctx, x, fy - 4, w, 4, S.sky === 'night' ? '7' : '6');
+  const pw = Math.max(2, Math.round(w * (1 - LD.open)));
+  R(ctx, x, y, pw, h, 'h'); R(ctx, x + pw - 1, y, 1, h, 'n');
+  if (pw > 6) { R(ctx, x + 2, y + 3, pw - 4, 10, 'a'); R(ctx, x + 2, y + 3, pw - 4, 1, 'c'); }
+};
+
 const drawOffAir = function () {
   const off = S.rooms.filter((r) => r.offAir && S.floors.includes(r.id));
   if (!off.length) return;
@@ -325,6 +335,7 @@ const draw = function (t) {
     for (const g of S.anim.out) ctx.drawImage(g.cv, -Math.round(S.anim.ps * S.LW), g.top);
     for (const [id, f] of S.fc) ctx.drawImage(f, S.anim.slide.has(id) ? -Math.round((1 - S.anim.p) * S.LW) : 0, topNow(id));
   } else ctx.drawImage(stCv, 0, 0);
+  drawLobbyDoor();
   S.dim += ((NIGHT || (S.total > 0 && S.working / S.total <= 0.1) ? 1 : 0) - S.dim) * Math.min(1, S.dt * 0.8);
   for (const [rid, arr] of S.slots) {
     if (!S.floors.includes(rid)) continue;

@@ -41,6 +41,7 @@ let rz = 0;
 window.addEventListener('resize', () => { clearTimeout(rz); rz = setTimeout(layout, 100); });
 
 spawn(elevatorProc());
+spawn(lobbyDoorProc());
 spawn(queueProc());
 spawn(bossProc());
 spawn(behaviorProc());
@@ -58,6 +59,7 @@ window['__office'] = {
   labels: () => S.floors.map((id, i) => labelLines(id).rows.map((r, j) => ({ id, x: BM + 3, y: floorTop(i) + 7 + j * 8 + (r.sm ? 1 : 0), w: fitW(r.t, r.sm), h: r.sm ? 5 : 7, t: r.t, sm: !!r.sm }))).flat(),
   desks: () => { const o = []; for (const [rid, arr] of S.slots) arr.forEach((aid, k) => { if (aid) o.push({ id: aid, room: rid, k, row: slotRow(rid, k), x: slotX(rid, k), y: deskFoot(rid, k) }); }); return o; },
   agents: () => [...S.agents.values()].map((a) => ({ id: a.id, name: a.name, state: a.state, room: a.room, fr: a.fr, x: a.x, y: yOf(a), dy: a.dy, sit: a.sit, away: a.away, queued: a.q && a.fr === BOSS && !a.walking && !a.inCab, settled: settledAway(a), q: a.q, title: a.title, walking: a.walking, facing: a.facing, inCab: a.inCab, visitor: a.visitor, gone: a.gone, leaving: !!a.leaving, alpha: a.alpha, bubble: a.bubble ? bubbleRect(a) : null })),
+  lobbyDoor: () => ({ open: LD.open, x: lobbyDoorX() }),
   elevator: () => ({ fy: E.fy, open: E.open, queue: E.queue.length, rider: E.rider ? E.rider.id : null, x: EXC(), foot: cabFoot(), h: cabH() }),
   boss: () => ({ x: bossX(), foot: footY(0), spot: bossSpot(), desk: { x: bossX() - 12, y: footY(0) - 25, w: BOSS_DESK_W + 17, h: 25 }, floor: BOSS }),
   focus: (id, at) => { setFocus(id, at || String(Date.now())); return true; },

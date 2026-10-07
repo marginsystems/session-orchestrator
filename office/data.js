@@ -43,7 +43,7 @@ const applyState = function (raw) {
     let a = S.agents.get(d.id);
     if (!a) {
       a = newAgent(d); S.agents.set(a.id, a);
-      if (joinIds.has(d.id)) { a.joining = true; a.away = true; a.fr = LOBBY; a.x = BM + 14; a.sit = 0; a.facing = 1; joiners.push(a); }
+      if (joinIds.has(d.id)) { a.joining = true; a.away = true; a.fr = LOBBY; a.x = BM + 8; a.alpha = 0; a.sit = 0; a.facing = 1; joiners.push(a); }
     }
     a.name = d.name; a.state = d.state; a.sleepy = !!d.sleepy; a.gone = false; a.title = d.title || '';
     if (a.room !== d.room) { a.room = d.room; if (!a.away) a.fr = d.room; }
@@ -109,7 +109,7 @@ const applyState = function (raw) {
   else { snapSeated(); if (recount) drawStatic(); }
   if (reorder) beginAnim(oldFloors, added, ghosts, oldLH, oldSlots);
   for (const a of joiners) spawn(joinTask(a));
-  leavers.forEach((a, k) => spawn(k < 3 ? leaveTask(a) : fadeTask(a)));
+  leavers.forEach((a) => spawn(leaveTask(a)));
   UI.dirty = true;
   maybeStartTour();
 };

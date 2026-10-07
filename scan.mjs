@@ -98,8 +98,7 @@ function lastCwd(text, slug) {
   return launch || last;
 }
 
-const MSG_RE = /<cross-session-message[^>]*?from-session=\\?"(local_[0-9a-fA-F-]+)\\?"/g;
-const TS_RE = /"timestamp":"([^"]+)"/;
+const MSG_RE = /<cross-session-message[^>]*?from(?:-session)?=\\?"(local_[0-9a-fA-F-]+)\\?"/g;
 
 function analyzeFile(path, size) {
   const tail = readTail(path, size);
@@ -112,25 +111,28 @@ function analyzeFile(path, size) {
   const seen = new Set();
   for (const line of tail.split('\n')) {
     if (!line) continue;
-    if (line.includes('<cross-session-message')) {
-      const ts = TS_RE.exec(line);
-      const at = ts ? Date.parse(ts[1]) : NaN;
-      if (Number.isFinite(at)) {
-        for (const m of line.matchAll(MSG_RE)) {
-          const key = m[1] + ':' + Math.floor(at / 10000);
-          if (!seen.has(key)) {
-            seen.add(key);
-            messages.push({ from: m[1], at });
-          }
-        }
-      }
-    }
     if (!line.startsWith('{')) continue;
     let o;
     try {
       o = JSON.parse(line);
     } catch {
       continue;
+    }
+    const content = o.message && o.message.content;
+    const texts = typeof content === 'string' ? [content] : Array.isArray(content) && !content.some((b) => b && b.type === 'tool_result') ? content.filter((b) => b && b.type === 'text' && typeof b.text === 'string').map((b) => b.text) : [];
+    if (o.type === 'user' && !o.isSidechain && texts.some((text) => text.includes('<cross-session-message'))) {
+      const at = Date.parse(o.timestamp);
+      if (Number.isFinite(at)) {
+        for (const text of texts) {
+          for (const m of text.matchAll(MSG_RE)) {
+            const key = m[1] + ':' + Math.floor(at / 10000);
+            if (!seen.has(key)) {
+              seen.add(key);
+              messages.push({ from: m[1], at });
+            }
+          }
+        }
+      }
     }
     if (o.type === 'user' && isHumanPrompt(o)) {
       const at = Date.parse(o.timestamp);
@@ -178,18 +180,20 @@ function sidebarSessions(desktop) {
 }
 
 function desktopSessions() {
-  const out = new Map();
+  const out = Object.assign(new Map(), { available: false });
   let level1;
   try {
     level1 = readdirSync(DESKTOP_SESSIONS);
   } catch {
     return out;
   }
+  let complete = true;
   for (const a of level1) {
     let level2;
     try {
       level2 = readdirSync(join(DESKTOP_SESSIONS, a));
     } catch {
+      complete = false;
       continue;
     }
     for (const b of level2) {
@@ -197,6 +201,7 @@ function desktopSessions() {
       try {
         files = readdirSync(join(DESKTOP_SESSIONS, a, b));
       } catch {
+        complete = false;
         continue;
       }
       for (const f of files) {
@@ -206,6 +211,7 @@ function desktopSessions() {
         try {
           st = statSync(p);
         } catch {
+          complete = false;
           continue;
         }
         let rec = desktopCache.get(p);
@@ -222,6 +228,7 @@ function desktopSessions() {
       }
     }
   }
+  out.available = complete;
   return out;
 }
 
@@ -300,6 +307,12 @@ function readFocus(now, desktop) {
   return null;
 }
 
+const sessionGone = (sid, desktop) => {
+  if (typeof sid !== 'string' || !sid || !desktop.available) return false;
+  const rec = sid.startsWith('local_') ? desktop.get(sid) : [...desktop.values()].find((r) => r.cli === sid);
+  return sid.startsWith('local_') ? !rec || rec.archived === true : Boolean(rec && rec.archived);
+};
+
 const toUuid = (sid, desktop) => {
   if (typeof sid !== 'string' || !sid) return '';
   const uuid = sid.startsWith('local_') ? (desktop.get(sid) || {}).cli : sid;
@@ -310,19 +323,23 @@ function readQueue(now, desktop, source) {
   try {
     const f = source === undefined ? JSON.parse(readFileSync(QUEUE_FILE, 'utf8')) : source;
     const at = Date.parse(f.at);
-    if (!Number.isFinite(at) || at > now + 60000 || now - at >= FOCUS_MAX_MS || !Array.isArray(f.items)) return { uuids: [], slots: [], size: 0, orchestrator: '' };
+    if (!Number.isFinite(at) || at > now + 60000 || now - at >= FOCUS_MAX_MS || !Array.isArray(f.items)) return { uuids: [], slots: [], gone: [], size: 0, orchestrator: '' };
     const items = f.items.slice(0, QUEUE_MAX);
     const uuids = [];
     const slots = [];
+    const gone = [];
     for (const it of items) {
-      const uuid = toUuid(typeof it === 'string' ? it : it && it.sessionId, desktop);
+      const sid = typeof it === 'string' ? it : it && it.sessionId;
+      const isGone = sessionGone(sid, desktop);
+      const uuid = isGone ? '' : toUuid(sid, desktop);
       const fresh = uuid !== '' && !uuids.includes(uuid);
       if (fresh) uuids.push(uuid);
       slots.push(fresh ? uuid : '');
+      gone.push(isGone);
     }
-    return { uuids, slots, size: items.length, orchestrator: toUuid(f.orchestrator, desktop) };
+    return { uuids, slots, gone, size: items.length - gone.filter(Boolean).length, orchestrator: toUuid(f.orchestrator, desktop) };
   } catch {
-    return { uuids: [], slots: [], size: 0, orchestrator: '' };
+    return { uuids: [], slots: [], gone: [], size: 0, orchestrator: '' };
   }
 }
 
@@ -438,7 +455,7 @@ function scanFull(now = Date.now(), queueSource) {
   }
   picked.sort((a, b) => b.mtime - a.mtime);
   const airUuids = new Set(picked.filter((s) => !streaming || air.has(s.room.id)).map((s) => s.uuid));
-  const slotOnAir = queueFile.slots.map((u) => !streaming || (u !== '' && airUuids.has(u)));
+  const slotOnAir = queueFile.slots.map((u, i) => !queueFile.gone[i] && (!streaming || (u !== '' && airUuids.has(u))));
   const queuedAir = queued.filter((u) => airUuids.has(u));
   const waitingSet = new Set(queuedAir);
 
@@ -485,7 +502,9 @@ function scanFull(now = Date.now(), queueSource) {
   events.sort((a, b) => a.at - b.at);
 
   const target = focusUuid ? byUuid.get(focusUuid) : null;
-  const focus = wanted ? { agentId: target ? target.id : 'visitor', at: wanted.at } : null;
+  const focused = focusUuid ? agents.find((x) => x.s.uuid === focusUuid) : undefined;
+  const answered = !!wanted && !!focused && [...focused.s.info.prompts, ...focused.s.info.messages].some((p) => p.at > wanted.at);
+  const focus = wanted && !answered ? { agentId: target ? target.id : 'visitor', at: wanted.at } : null;
 
   const ordered = [...rooms.values()].sort((a, b) => {
     const ra = priorityRank(a), rb = priorityRank(b);
@@ -548,14 +567,17 @@ function nextInfo() {
     if (Number.isFinite(at) && at <= now + 60000 && now - at < FOCUS_MAX_MS && Array.isArray(queueSource.items)) items = queueSource.items.slice(0, QUEUE_MAX);
   } catch {}
   if (!items.length) return 'QUEUE: empty';
-  let index = 0;
+  const gone = readQueue(now, desktop, queueSource).gone;
+  const goneLine = gone.some(Boolean) ? 'GONE: ' + gone.flatMap((g, i) => (g ? [i] : [])).join(',') + '\n' : '';
+  let index = gone.findIndex((g) => !g);
+  if (index < 0) return goneLine + 'QUEUE: empty';
   if (settings.streamer) {
     const eligible = scanFull(now, queueSource).slotOnAir;
     index = eligible.findIndex((ok) => ok);
-    if (index < 0) return 'QUEUE: nothing on air';
+    if (index < 0) return goneLine + 'QUEUE: nothing on air';
   }
   const item = items[index];
-  const prefix = ['QUEUE_INDEX: ' + index, ...(settings.streamer ? ['DEFERRED: ' + index] : [])].join('\n') + '\n';
+  const prefix = goneLine + ['QUEUE_INDEX: ' + index, ...(settings.streamer ? ['DEFERRED: ' + index] : [])].join('\n') + '\n';
   const sid = typeof item === 'string' ? item : item && typeof item.sessionId === 'string' ? item.sessionId : '';
   if (!sid) return prefix + 'SESSION_ID: "none"\nTITLE: "none"\nPROJECT: "none"\nCONTEXT_TOKENS: 0';
   const rec = sid.startsWith('local_') ? desktop.get(sid) : [...desktop.values()].find((r) => r.cli === sid);
