@@ -178,8 +178,7 @@ function sidebarSessions(desktop) {
 }
 
 function desktopSessions() {
-  const out = new Map();
-  out.available = false;
+  const out = Object.assign(new Map(), { available: false });
   let level1;
   try {
     level1 = readdirSync(DESKTOP_SESSIONS);
