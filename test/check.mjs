@@ -229,8 +229,6 @@ async function queueSeatCheck(page, tag) {
     if (k) check(a.x > seated[k - 1].x, `${tag} queue seats out of order`);
   });
   check(q.spots[0] > q.door && q.spots[q.spots.length - 1] < q.door + q.hall, `${tag} chairs outside the waiting room`);
-  const rank = await page.evaluate(() => { const o = window.__office, rooms = o.rooms().map((r) => r.id); return o.queue().queue.map((id) => rooms.indexOf(o.agents().find((a) => a.id === id).room)); });
-  check(rank.every((r, i) => !i || rank[i - 1] <= r), `${tag} queue not ordered by floor priority: ${rank}`);
 }
 
 async function secretaryCheck(page, tag) {
@@ -446,6 +444,12 @@ function httpReq(port, { method = 'GET', path = '/', headers = {}, body, host })
   });
 }
 
+function writeQueue(root, ids) {
+  const dir = join(root, '.session-orchestrator');
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'queue.json'), JSON.stringify({ at: new Date().toISOString(), items: ids.map((sessionId) => ({ sessionId })) }));
+}
+
 function makeFixture(root) {
   const spec = {
     atlas: [['tool_use', 300], ['reply', 3600], ['prompt', 5]],
@@ -473,6 +477,9 @@ function makeFixture(root) {
   const meta = join(root, 'Library', 'Application Support', 'Claude', 'claude-code-sessions', 'acct', 'org');
   mkdirSync(meta, { recursive: true });
   writeFileSync(join(meta, 'local_fixture1.json'), JSON.stringify({ sessionId: 'local_fixture1', cliSessionId: out[0].uuid, title: 'Tidy the parser' }));
+  const pick = (project, ageSec) => out.find((f) => f.project === project && f.ageSec === ageSec);
+  const queued = [pick('atlas', 300), pick('delta', 400), pick('beacon', 380), pick('beacon', 200), pick('citadel', 240)];
+  writeQueue(root, ['local_fixture1', null, ...queued.slice(1).map((f) => f.uuid)]);
   return out;
 }
 
@@ -583,8 +590,8 @@ if (want('server')) {
   check(r.status === 200, `valid order post rejected ${r.status} ${r.text}`);
   s = await stateOf(SPORT);
   check(s.rooms.map((x) => x.label).join() === 'citadel,beacon,atlas,delta', `priority not applied to rooms: ${s.rooms.map((x) => x.label)}`);
-  const expectOrdered = [ids.citadel240, ids.beacon380, ids.beacon200, ids.atlas300, ids.delta400];
-  check(JSON.stringify(s.queue) === JSON.stringify(expectOrdered), `queue not ordered by floor priority then wait: ${JSON.stringify(s.queue)}`);
+  check(JSON.stringify(s.queue) === JSON.stringify(expectDefault), `floor priority reordered the orchestrator queue: ${JSON.stringify(s.queue)}`);
+  check(s.agents.filter((a) => a.state === 'waiting').length === expectDefault.length, 'waiting agents differ from the queue');
   await post({ anonymize: true });
   s = await stateOf(SPORT);
   check(s.rooms.map((x) => x.label).join() === 'Room A,Room B,Room C,Room D', `anonymize not applied: ${s.rooms.map((x) => x.label)}`);
@@ -765,6 +772,7 @@ if (want('live')) {
     const expect = [ids.atlas300, ids.delta400, ids.beacon380, ids.beacon200, ids.citadel240].filter((id) => q.queue.includes(id));
     check(JSON.stringify(q.queue) === JSON.stringify(expect), `browser queue ${JSON.stringify(q.queue)} != ${JSON.stringify(expect)}`);
     check(q.want.length === Math.min(q.cap, q.queue.length), `queue seats ${q.want.length} vs capacity ${q.cap}`);
+    check(JSON.stringify(q.want) === JSON.stringify(expect.slice(0, q.want.length)), `waiting room order ${JSON.stringify(q.want)} differs from fixture queue ${JSON.stringify(expect)}`);
     await queueSeatCheck(page, 'live');
     await page.screenshot({ path: join(SHOTS, 'live-queue.png') });
     writeFileSync(join(home, '.session-orchestrator', 'focus.json'), JSON.stringify({ sessionId: fx.find((f) => f.id === q.want[0]).uuid, at: new Date().toISOString() }));

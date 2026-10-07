@@ -26,6 +26,8 @@ const OPTS = {
 
 const DATA_DIR = join(homedir(), '.session-orchestrator');
 const FOCUS_FILE = join(DATA_DIR, 'focus.json');
+const QUEUE_FILE = join(DATA_DIR, 'queue.json');
+const QUEUE_MAX = 200;
 const SETTINGS_FILE = join(DATA_DIR, 'settings.json');
 const SETTINGS_MAX_BYTES = 4096;
 const ORDER_MAX = 64;
@@ -36,7 +38,6 @@ const DESKTOP_SESSIONS = join(homedir(), 'Library', 'Application Support', 'Clau
 const WINDOW_MS = 7 * 24 * 3600 * 1000;
 const WORKING_MS = 30 * 1000;
 const PENDING_WORKING_MS = 120 * 1000;
-const PENDING_MAX_MS = 10 * 60 * 1000;
 const SLEEPY_MS = 30 * 60 * 1000;
 const EVENT_MS = 10 * 60 * 1000;
 const TAIL_BYTES = 400 * 1024;
@@ -254,11 +255,32 @@ function readFocus(now, desktop) {
     const at = Date.parse(f.at);
     const sid = typeof f.sessionId === 'string' ? f.sessionId : '';
     if (sid && Number.isFinite(at) && at <= now && now - at < FOCUS_MAX_MS) {
-      const uuid = sid.startsWith('local_') ? (desktop.get(sid) || {}).cli : sid;
-      return { uuid: typeof uuid === 'string' ? uuid : '', at };
+      return { uuid: toUuid(sid, desktop), at };
     }
   } catch {}
   return null;
+}
+
+const toUuid = (sid, desktop) => {
+  if (typeof sid !== 'string' || !sid) return '';
+  const uuid = sid.startsWith('local_') ? (desktop.get(sid) || {}).cli : sid;
+  return typeof uuid === 'string' ? uuid : '';
+};
+
+function readQueue(now, desktop) {
+  try {
+    const f = JSON.parse(readFileSync(QUEUE_FILE, 'utf8'));
+    const at = Date.parse(f.at);
+    if (!Number.isFinite(at) || at > now + 60000 || now - at >= FOCUS_MAX_MS || !Array.isArray(f.items)) return [];
+    const out = [];
+    for (const it of f.items.slice(0, QUEUE_MAX)) {
+      const uuid = toUuid(typeof it === 'string' ? it : it && it.sessionId, desktop);
+      if (uuid && !out.includes(uuid)) out.push(uuid);
+    }
+    return out;
+  } catch {
+    return [];
+  }
 }
 
 function loadSettings() {
@@ -344,8 +366,10 @@ function scan(now = Date.now()) {
 
   const rooms = new Map();
   const picked = [];
-  const focused = found.find((s) => s.uuid === focusUuid);
-  const candidates = focused ? [focused, ...found.filter((s) => s !== focused)] : found;
+  const queued = readQueue(now, desktop);
+  const queuedSet = new Set(queued);
+  const first = [focusUuid, ...queued].map((u) => found.find((s) => s.uuid === u)).filter((s) => s !== undefined);
+  const candidates = [...new Set([...first, ...found])];
   for (const s of candidates) {
     if (picked.length >= OPTS.max) break;
     const info = analyzeCached(s.p, s.st);
@@ -375,7 +399,7 @@ function scan(now = Date.now()) {
     if (age < WORKING_MS) state = 'working';
     else if (kind === 'tool_use' && age < PENDING_WORKING_MS) state = 'working';
     else if (kind === 'prompt' && age < PENDING_WORKING_MS) state = 'working';
-    else if (kind === 'tool_use' && age < PENDING_MAX_MS) state = 'waiting';
+    if (queuedSet.has(s.uuid)) state = 'waiting';
     let name = NAMES[num(s.uuid) % NAMES.length];
     for (let n = 2; names.has(name); n++) name = NAMES[num(s.uuid) % NAMES.length] + ' ' + n;
     names.add(name);
@@ -415,15 +439,12 @@ function scan(now = Date.now()) {
     if (ra !== rb) return ra < rb ? -1 : 1;
     return b.latest - a.latest;
   });
-  const rankOfRoom = new Map(ordered.map((r, i) => [r.id, i]));
   const outRooms = ordered.map((r, i) => ({
     id: r.id,
     label: anonymizing() ? 'Room ' + String.fromCharCode(65 + (i % 26)) + (i >= 26 ? Math.floor(i / 26) : '') : roomLabel(r.root),
   }));
-  const queue = agents
-    .filter((x) => x.state === 'waiting')
-    .sort((a, b) => (rankOfRoom.get(a.s.room.id) ?? 0) - (rankOfRoom.get(b.s.room.id) ?? 0) || a.s.mtime - b.s.mtime)
-    .map((x) => x.agent.id);
+  const foundUuids = new Set(found.map((s) => s.uuid));
+  const queue = queued.filter((u) => foundUuids.has(u)).map((u) => byUuid.get(u)?.id || 'a' + sha(u).slice(0, 8));
 
   return { generatedAt: now, rooms: outRooms, agents: agents.map((a) => a.agent), events, focus, queue };
 }

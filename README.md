@@ -6,11 +6,11 @@ A local-only, retro pixel-art "agent office" for your Claude Code sessions.
 
 <!-- The recording lives at docs/office.gif. Record the office in demo mode (index.html?demo=1&onboarding=0, around 1280x720, 10 to 20 seconds, under 5 MB) so no real project names appear, and replace that one file. -->
 
-Every project folder is a floor, every Claude Code session is a pixel critter at its desk, and a Boss Office sits on top. Sessions that are waiting for you take a number and sit in the Secretary's waiting room, ordered by floor priority and then by how long they have waited. An elevator carries agents between floors.
+Every project folder is a floor, every Claude Code session is a pixel critter at its desk, and a Boss Office sits on top. The orchestrator's queue stands in the Secretary's waiting room, in queue order. An elevator carries agents between floors.
 
 Everything on screen reflects something that really happens:
 
-- Working: the critter types and the CRT scrolls. Waiting: a thought bubble, or a seat in the waiting room. Idle: blinks, sips coffee, stretches, and eventually naps.
+- Working: the critter types and the CRT scrolls. Waiting: in the orchestrator's queue, standing in the waiting room. Idle: blinks, sips coffee, stretches, and eventually naps.
 - You prompt a session directly: the boss gets up, rides the elevator to that session's desk, they exchange a short line, and he goes back to his chair.
 - One session messages another: the sender walks to the recipient's desk (via the elevator when on another floor).
 - A new session starts: a desk drops in on the project's floor, a dust puff, and the new critter rides up from the Lobby and sits. A brand-new project gets a new floor that slides in.
@@ -84,6 +84,10 @@ Settings are saved to `~/.session-orchestrator/settings.json` through the loopba
 
 The first time you open the office, the Boss walks you through six short steps: your office, floors and critters, the three states, setting priorities (you drag a floor, and confetti follows), the boss queue and `next`, and the privacy promise. Skip any time with Skip or Esc. Add `?onboarding=1` to force it, or `?onboarding=0` to suppress it.
 
+## Orchestrator: `/orchestrate` and `/next`
+
+Run `/orchestrate` in one session to make it the orchestrator; running it in another session hands the job over. In that session, `/next` brings the front of the queue into the Boss Office.
+
 ## The `next` contract
 
 An orchestrator session (or anything else) writes `~/.session-orchestrator/focus.json` when you want a session brought to the boss:
@@ -94,7 +98,13 @@ An orchestrator session (or anything else) writes `~/.session-orchestrator/focus
 
 `sessionId` may be a desktop `local_...` id or a transcript uuid. `scan.mjs` only reads the file, never writes it, maps the id to an agent the same way message senders are mapped, and adds `focus: {agentId, at}` to `state.json`. The secretary waves that agent through, it walks into the Boss Office, stands in front of his desk and says a generic line while the boss looks up. It goes back to its desk when focus changes or clears. An unknown session sends a Guest up from the Lobby. A missing file or one older than 24 hours means no focus.
 
-The front of the waiting line is the agent `next` would bring in: waiting agents ordered by floor priority, then by how long they have waited. `state.json` lists them in `queue`.
+The waiting room is the orchestrator's queue. The orchestrator writes it to `~/.session-orchestrator/queue.json` whenever the queue changes:
+
+```
+{"at": "2026-10-06T12:00:00Z", "items": [{"sessionId": "local_..."}, {"sessionId": null}]}
+```
+
+Every queued session stands in the waiting room in that order, front first; items without a session are skipped. `scan.mjs` only reads the file. A missing file or one older than 24 hours means an empty waiting room. `state.json` lists the queued agents in `queue`.
 
 ## state.json
 
@@ -124,13 +134,12 @@ The front of the waiting line is the agent `next` would bring in: waiting agents
 
 ## How state is detected
 
-For each transcript in `~/.claude/projects/<slug>/<uuid>.jsonl` modified in the last 7 days, the tail of the file gives the working directory and the last conversation entry. A session is `working` if the file changed within 30 seconds, or its last entry is a tool call or a user prompt with no reply yet (up to 2 minutes). A tool call left pending for 2 to 10 minutes counts as `waiting`; anything else is `idle`, and idle for 30 minutes shows the sleepy "z". Cross-session messages are found as `<cross-session-message from-session="local_...">` turns in the recipient transcript; the sender id is mapped to a transcript through the Claude desktop session metadata, and an unmapped sender walks in from the lobby as a visitor.
+For each transcript in `~/.claude/projects/<slug>/<uuid>.jsonl` modified in the last 7 days, the tail of the file gives the working directory and the last conversation entry. A session is `working` if the file changed within 30 seconds, or its last entry is a tool call or a user prompt with no reply yet (up to 2 minutes). A session in the orchestrator's queue is `waiting`; anything else is `idle`, and idle for 30 minutes shows the sleepy "z". Cross-session messages are found as `<cross-session-message from-session="local_...">` turns in the recipient transcript; the sender id is mapped to a transcript through the Claude desktop session metadata, and an unmapped sender walks in from the lobby as a visitor.
 
 ## Known limits
 
 - Tested on macOS only. Transcripts are read from `~/.claude/projects` on any OS, but the Claude desktop app session metadata is read from `~/Library/Application Support/Claude`, so on Linux and Windows cross-session senders show as visitors, `local_...` ids in `focus.json` do not resolve, and session titles are unavailable.
 - `local_...` session ids exist only for sessions started in the Claude desktop app. For a terminal session, write its transcript uuid to `focus.json` instead.
-- State is a guess from transcript timing, not a live signal: `waiting` means a tool call has been pending for 2 to 10 minutes, usually a permission prompt. A session that has finished its turn and waits for your next prompt shows as idle.
 - Only transcripts changed in the last 7 days are shown, at most 30 agents, 6 per floor and 12 floors (`--max` raises the agent cap only).
 - The office is a browser tab on `127.0.0.1:7777`; `/office` always uses that port. There is no in-app pane yet.
 - No sound yet.
