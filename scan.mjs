@@ -99,7 +99,6 @@ function lastCwd(text, slug) {
 }
 
 const MSG_RE = /<cross-session-message[^>]*?from(?:-session)?=\\?"(local_[0-9a-fA-F-]+)\\?"/g;
-const TS_RE = /"timestamp":"([^"]+)"/;
 
 function analyzeFile(path, size) {
   const tail = readTail(path, size);
@@ -112,11 +111,18 @@ function analyzeFile(path, size) {
   const seen = new Set();
   for (const line of tail.split('\n')) {
     if (!line) continue;
-    if (line.includes('<cross-session-message')) {
-      const ts = TS_RE.exec(line);
-      const at = ts ? Date.parse(ts[1]) : NaN;
+    if (!line.startsWith('{')) continue;
+    let o;
+    try {
+      o = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    const content = o.message && o.message.content;
+    if (o.type === 'user' && !o.isSidechain && typeof content === 'string' && content.includes('<cross-session-message')) {
+      const at = Date.parse(o.timestamp);
       if (Number.isFinite(at)) {
-        for (const m of line.matchAll(MSG_RE)) {
+        for (const m of content.matchAll(MSG_RE)) {
           const key = m[1] + ':' + Math.floor(at / 10000);
           if (!seen.has(key)) {
             seen.add(key);
@@ -124,13 +130,6 @@ function analyzeFile(path, size) {
           }
         }
       }
-    }
-    if (!line.startsWith('{')) continue;
-    let o;
-    try {
-      o = JSON.parse(line);
-    } catch {
-      continue;
     }
     if (o.type === 'user' && isHumanPrompt(o)) {
       const at = Date.parse(o.timestamp);
