@@ -169,6 +169,14 @@ function analyzeCached(path, st) {
 
 const desktopCache = new Map();
 
+function sidebarSessions(desktop) {
+  let account = '', newest = -1;
+  for (const rec of desktop.values()) if (rec.last > newest) { newest = rec.last; account = rec.account; }
+  const out = new Set();
+  for (const rec of desktop.values()) if (rec.account === account && !rec.archived) out.add(rec.cli);
+  return out;
+}
+
 function desktopSessions() {
   const out = new Map();
   let level1;
@@ -204,7 +212,7 @@ function desktopSessions() {
         if (!rec || rec.mtimeMs !== st.mtimeMs) {
           try {
             const j = JSON.parse(readFileSync(p, 'utf8'));
-            rec = { mtimeMs: st.mtimeMs, local: j.sessionId, cli: j.cliSessionId, title: j.title };
+            rec = { mtimeMs: st.mtimeMs, local: j.sessionId, cli: j.cliSessionId, title: j.title, archived: j.isArchived === true, account: a, last: Number(j.lastActivityAt) || 0 };
           } catch {
             rec = { mtimeMs: st.mtimeMs };
           }
@@ -362,6 +370,7 @@ function scanFull(now = Date.now(), queueSource) {
   const desktop = desktopSessions();
   const cliToLocal = new Map();
   for (const rec of desktop.values()) cliToLocal.set(rec.cli, rec);
+  const listed = sidebarSessions(desktop);
 
   const found = [];
   let dirs = [];
@@ -384,8 +393,9 @@ function scanFull(now = Date.now(), queueSource) {
       } catch {
         continue;
       }
-      if (!st.isFile() || now - st.mtimeMs > WINDOW_MS) continue;
-      found.push({ p, uuid: f.slice(0, -6), mtime: st.mtimeMs, st });
+      const uuid = f.slice(0, -6);
+      if (!st.isFile() || (desktop.size ? !listed.has(uuid) : now - st.mtimeMs > WINDOW_MS)) continue;
+      found.push({ p, uuid, mtime: st.mtimeMs, st });
     }
   }
   found.sort((a, b) => b.mtime - a.mtime);

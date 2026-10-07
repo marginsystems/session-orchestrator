@@ -151,13 +151,13 @@ Every item stands in the waiting room in that order, front first, so a long queu
 
 ## How state is detected
 
-For each transcript in `~/.claude/projects/<slug>/<uuid>.jsonl` modified in the last 7 days, the tail of the file gives the working directory and the last conversation entry. A session is `working` if the file changed within 30 seconds, or its last entry is a tool call or a user prompt with no reply yet (up to 2 minutes). A session in the orchestrator's queue is `waiting`; anything else is `idle`, and idle for 30 minutes shows the sleepy "z". Cross-session messages are found as `<cross-session-message from-session="local_...">` turns in the recipient transcript; the sender id is mapped to a transcript through the Claude desktop session metadata, and an unmapped sender walks in from the lobby as a visitor.
+Sessions are the ones your Claude Code sidebar lists: when the Claude desktop app's session metadata exists, the office shows the sessions of the account you used most recently that are not archived, whatever their age; other accounts and archived sessions are left out. Without that metadata (terminal only), it shows transcripts changed in the last 7 days. For each shown transcript in `~/.claude/projects/<slug>/<uuid>.jsonl`, the tail of the file gives the working directory and the last conversation entry. A session is `working` if the file changed within 30 seconds, or its last entry is a tool call or a user prompt with no reply yet (up to 2 minutes). A session in the orchestrator's queue is `waiting`; anything else is `idle`, and idle for 30 minutes shows the sleepy "z". Cross-session messages are found as `<cross-session-message from-session="local_...">` turns in the recipient transcript; the sender id is mapped to a transcript through the Claude desktop session metadata, and an unmapped sender walks in from the lobby as a visitor.
 
 ## Known limits
 
 - Tested on macOS only. Transcripts are read from `~/.claude/projects` on any OS, but the Claude desktop app session metadata is read from `~/Library/Application Support/Claude`, so on Linux and Windows cross-session senders show as visitors, `local_...` ids in `focus.json` do not resolve, and session titles are unavailable.
 - `local_...` session ids exist only for sessions started in the Claude desktop app. For a terminal session, write its transcript uuid to `focus.json` instead.
-- Only transcripts changed in the last 7 days are shown, at most 30 agents, 6 per floor and 12 floors (`--max` raises the agent cap only).
+- At most 30 agents, 6 per floor and 12 floors are shown (`--max` raises the agent cap only). Without the desktop app's session metadata, only transcripts changed in the last 7 days count.
 - The office is a browser tab on `127.0.0.1:7777`; `/office` always uses that port. There is no in-app pane yet.
 - No sound yet.
 

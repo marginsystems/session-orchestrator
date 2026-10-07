@@ -518,13 +518,22 @@ function makeFixture(root) {
       out.push({ project, uuid, file, kind, ageSec, id: agentId(uuid) });
     });
   }
-  const meta = join(root, 'Library', 'Application Support', 'Claude', 'claude-code-sessions', 'acct', 'org');
-  mkdirSync(meta, { recursive: true });
-  writeFileSync(join(meta, 'local_fixture1.json'), JSON.stringify({ sessionId: 'local_fixture1', cliSessionId: out[0].uuid, title: 'Tidy the parser' }));
+  writeDesktop(root, 'local_fixture1', out[0].uuid, { title: 'Tidy the parser', lastActivityAt: Date.now() });
+  out.slice(1).forEach((f, n) => writeDesktop(root, 'local_fx' + n, f.uuid));
+  const hiddenDir = join(root, '.claude', 'projects', '-work-hidden');
+  mkdirSync(hiddenDir, { recursive: true });
+  writeDesktop(root, 'local_archived1', writeSession(hiddenDir, 'hidden', 50).uuid, { isArchived: true });
+  writeDesktop(root, 'local_otheracct1', writeSession(hiddenDir, 'hidden', 60).uuid, {}, 'oldacct');
   const pick = (project, ageSec) => out.find((f) => f.project === project && f.ageSec === ageSec);
   const queued = [pick('atlas', 300), pick('delta', 400), pick('beacon', 380), pick('beacon', 200), pick('citadel', 240)];
   writeQueue(root, ['local_fixture1', null, ...queued.slice(1).map((f) => f.uuid)]);
   return out;
+}
+
+function writeDesktop(root, local, cli, extra = {}, account = 'acct') {
+  const meta = join(root, 'Library', 'Application Support', 'Claude', 'claude-code-sessions', account, 'org');
+  mkdirSync(meta, { recursive: true });
+  writeFileSync(join(meta, local + '.json'), JSON.stringify({ sessionId: local, cliSessionId: cli, isArchived: false, lastActivityAt: 1, ...extra }));
 }
 
 function makeCrowd(root) {
@@ -540,9 +549,8 @@ function makeCrowd(root) {
   }
   const oldest = { project: 'bulk', ageSec: 5000, ...writeSession(join(root, '.claude', 'projects', '-work-bulk'), 'bulk', 5000) };
   out.push(oldest);
-  const meta = join(root, 'Library', 'Application Support', 'Claude', 'claude-code-sessions', 'acct', 'org');
-  mkdirSync(meta, { recursive: true });
-  writeFileSync(join(meta, 'local_crowd1.json'), JSON.stringify({ sessionId: 'local_crowd1', cliSessionId: oldest.uuid }));
+  writeDesktop(root, 'local_crowd1', oldest.uuid, { lastActivityAt: Date.now() });
+  out.filter((f) => f !== oldest).forEach((f, n) => writeDesktop(root, 'local_cr' + n, f.uuid));
   return { sessions: out, oldest };
 }
 
@@ -639,6 +647,13 @@ const serverJob = async () => {
   check(s.line.length === 6 && s.line[1] === null && JSON.stringify(s.line.filter((id) => id)) === JSON.stringify(expectDefault), `waiting room line ${JSON.stringify(s.line)}`);
   const raw = JSON.stringify(s);
   check(!raw.includes('/work') && !raw.includes(fixtureHome) && !/"title"/.test(raw), 'state.json leaks paths or titles by default');
+  check(!s.rooms.some((r) => r.label === 'hidden'), 'archived or other-account sessions are shown');
+  const bare = mkdtempSync(join(tmpdir(), 'so-bare-'));
+  const bareDir = join(bare, '.claude', 'projects', '-work-solo');
+  mkdirSync(bareDir, { recursive: true });
+  writeSession(bareDir, 'solo', 30);
+  const bareState = JSON.parse(execFileSync('node', [join(ROOT, 'scan.mjs'), '--once', '--json'], { env: { ...process.env, HOME: bare }, encoding: 'utf8' }));
+  check(bareState.agents.length === 1 && bareState.rooms[0].label === 'solo', 'without desktop metadata the recent transcripts are not shown');
   const ok = { origin: `http://127.0.0.1:${SPORT}`, 'content-type': 'application/json' };
   const post = (obj, headers = ok) => httpReq(SPORT, { method: 'POST', path: '/settings', headers, body: typeof obj === 'string' ? obj : JSON.stringify(obj) });
   const defaults = JSON.parse((await httpReq(SPORT, { path: '/settings' })).text);
@@ -720,6 +735,7 @@ const serverJob = async () => {
   const echoDir = join(fixtureHome, '.claude', 'projects', '-work-echo');
   mkdirSync(echoDir, { recursive: true });
   const echoUuid = randomUUID();
+  writeDesktop(fixtureHome, 'local_echo1', echoUuid);
   writeFileSync(join(echoDir, echoUuid + '.jsonl'), JSON.stringify({ type: 'user', userType: 'external', cwd: '/work/echo', timestamp: nowIso(), message: { role: 'user', content: 'hello' } }) + '\n');
   s = await waitState(SPORT, (st) => st.events.some((e) => e.kind === 'join'));
   const joins = s.events.filter((e) => e.kind === 'join');
