@@ -157,7 +157,8 @@ For each transcript in `~/.claude/projects/<slug>/<uuid>.jsonl` modified in the 
 - `building.js`: state, layout, floors, walls, labels, static layers and the floor animation.
 - `actors.js`: the task system, walking, elevator, trips, boss visits, focus, queue and join or leave.
 - `render.js`: per-frame drawing of agents, bubbles, the elevator cab and effects.
-- `behavior.js`: the small social layer: personality, boredom, the rules table (contagion, chat, fidget, sleep spreads, line shuffle) and the `?chaos=` level.
+- `behavior-desk.js`: the desk-floor helpers for the behavior layer: water-cooler trips (idle agents wander to a cooler or coffee machine, chat in pairs of up to three, and always walk back; any real task ends the trip), the boss breaking up chats and naps, and the working neighbour's "SHH".
+- `behavior.js`: the small social layer: personality, boredom, the rules table (contagion, chat, fidget, sleep spreads, line shuffle, water cooler, boss effect, shh) and the `?chaos=` level.
 - `data.js`: applying server state, polling, settings load and save.
 - `demo.js`: the scripted demo.
 - `ui.js`: settings panel, hit buttons, drag and keyboard.

@@ -67,12 +67,17 @@ const pBookshelf = function (c, x, fy) {
     R(c, x0 + 1, sy + 6, w - 2, 1, 'h');
   }
 };
+const noteProp = function (kind, x) {
+  if (curFloor) S.dyn.props.push({ id: curFloor.id, kind, x, cell: Math.round((x - zl()) / pitchOf(curFloor.id) - 0.5) });
+};
 const pCooler = function (c, x, fy) {
+  noteProp('cooler', x);
   R(c, x - 5, fy - 12, 10, 12, 'd'); R(c, x - 5, fy - 12, 10, 1, 'c'); R(c, x + 3, fy - 11, 2, 11, 'e');
   R(c, x - 2, fy - 8, 3, 2, 'a'); px(c, x - 1, fy - 5, '2');
   R(c, x - 4, fy - 24, 8, 12, 'b'); R(c, x - 4, fy - 24, 1, 12, 'c'); R(c, x - 3, fy - 25, 6, 1, 'a'); R(c, x + 3, fy - 23, 1, 10, 'a');
 };
 const pCoffee = function (c, x, fy) {
+  noteProp('coffee', x);
   R(c, x - 10, fy - 9, 20, 2, 'h'); R(c, x - 9, fy - 7, 2, 7, 'g'); R(c, x + 7, fy - 7, 2, 7, 'g'); R(c, x - 9, fy - 3, 18, 1, 'n');
   R(c, x - 6, fy - 21, 10, 12, 'f'); R(c, x - 6, fy - 21, 10, 1, 'e'); R(c, x - 5, fy - 17, 8, 5, '0'); R(c, x - 2, fy - 12, 3, 3, 'c');
   R(c, x - 5, fy - 20, 8, 1, '2'); px(c, x - 5, fy - 19, 'e');

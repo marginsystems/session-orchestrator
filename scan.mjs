@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { isHumanPrompt } from './lib/prompts.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const PAGE_SCRIPT = /^\/office\/[a-z]+\.js$/;
+const PAGE_SCRIPT = /^\/office\/[a-z-]+\.js$/;
 const argv = process.argv.slice(2);
 const flag = (n) => argv.includes(n);
 const opt = (n, d) => {

@@ -1235,7 +1235,7 @@ async function behaviorRun(vw, vh, tag, chaos, shots) {
   const b = await ev(page, () => window.__office.behavior());
   console.log(tag, 'chaos', chaos, 'log', b.log.length, 'maxDrift', maxDrift.toFixed(2));
   check(!workingMoved, `${tag} a working agent left its desk`);
-  check(b.log.every((e) => e.state !== 'working'), `${tag} a working agent acted`);
+  check(b.log.every((e) => e.state !== 'working' || e.act === 'shh'), `${tag} a working agent acted`);
   check(b.log.filter((e) => e.act === 'doze').every((e) => e.state === 'idle'), `${tag} a non-idle agent dozed`);
   check(maxDrift < 3, `${tag} a waiting agent drifted ${maxDrift}px from its slot`);
   check(b.chaos === Number(chaos), `${tag} snapshot chaos ${b.chaos}`);
@@ -1287,10 +1287,187 @@ async function behaviorRun(vw, vh, tag, chaos, shots) {
   check(errors.length === 0, `${tag} behavior console errors ${errors.join('|')}`);
   await ctx.close();
 }
+function coolerFixture(withLeaver, patch = {}) {
+  const rooms = [{ id: 'c2', label: 'alpha' }, { id: 'd1', label: 'beta' }];
+  const mk = (id, room, state, extra = {}) => ({ id, name: id.toUpperCase(), room, state, since: state === 'waiting' ? 1 : 0, ...extra });
+  const agents = [mk('cw0', 'c2', 'working'), ...(withLeaver ? [mk('cx', 'c2', 'idle')] : []), mk('cw2', 'c2', 'working'), mk('ci3', 'c2', 'idle'), mk('ci4', 'c2', 'idle'), mk('ci5', 'c2', 'idle'), mk('ds0', 'd1', 'idle', { sleepy: true }), mk('di1', 'd1', 'idle'), mk('di2', 'd1', 'idle'), mk('dw3', 'd1', 'working')];
+  for (const a of agents) if (patch[a.id]) Object.assign(a, patch[a.id]);
+  const queue = agents.filter((a) => a.state === 'waiting').map((a) => a.id);
+  return { rooms, agents, events: [], queue, queueSize: queue.length, line: queue.slice(), generatedAt: Date.now() };
+}
+
+async function coolerRun(vw, vh, tag, chaos, shots) {
+  const url = `file://${ROOT}/index.html?onboarding=0&chaos=${chaos}&speed=3`;
+  const { ctx, page, errors } = await open(vw, vh, 1, url, 600);
+  const dir = process.env.SHOTS_BEHAVIOR2 || join(SHOTS, 'behavior2');
+  mkdirSync(dir, { recursive: true });
+  const taken = new Set();
+  const snap = async (name) => {
+    if (!shots || taken.has(name)) return;
+    taken.add(name);
+    await ev(page, () => { window['__rafKeep'] = window.requestAnimationFrame; window.requestAnimationFrame = () => 0; });
+    await sleep(120);
+    await page.screenshot({ path: join(dir, `${name}-${vw}.png`) });
+    await ev(page, () => { window.requestAnimationFrame = window['__rafKeep']; window.requestAnimationFrame((0, eval)('frame')); });
+  };
+  const sample = () => ev(page, () => ({ b: window.__office.behavior(), ag: window.__office.agents(), ds: window.__office.desks(), q: window.__office.queue() }));
+  const load = (st) => ev(page, (s) => window.__office.load(s), st);
+  await load(coolerFixture(true));
+  await sleep(800);
+  await load(coolerFixture(false));
+  let ready = false;
+  for (let i = 0; i < 200 && !ready; i++) {
+    await sleep(300);
+    const d = await sample();
+    ready = d.ds.filter((x) => x.room === 'c2').length === 5 && d.b.props.some((p) => p.id === 'c2' && (p.kind === 'cooler' || p.kind === 'coffee')) && d.ag.every((a) => !a.away && a.sit === 1);
+  }
+  check(ready, `${tag} the cooler floor never got a free cell with a prop`);
+  const events = [], seen = new Set();
+  const deskX = new Map();
+  const trips = new Map();
+  let maxAt = 0, sawPair = false, workerMoved = false, badReturn = '', pairFacingOk = false, sawShhPose = false;
+  const collect = (d) => {
+    for (const e of d.b.log) { const k = `${e.t}|${e.key}|${e.act}|${e.text}`; if (!seen.has(k)) { seen.add(k); events.push(e); } }
+    for (const x of d.ds) deskX.set(x.id, x.x);
+    const live = new Map(d.b.cooler.map((c) => [c.key, c]));
+    for (const c of d.b.cooler) trips.set(c.key, true);
+    for (const id of [...trips.keys()]) {
+      if (live.has(id)) continue;
+      trips.delete(id);
+      const a = d.ag.find((x) => x.id === id);
+      if (a && !a.gone && !a.q && a.state === 'idle' && (a.away || a.sit !== 1 || Math.abs(a.x - deskX.get(id)) > 0.6)) badReturn = `${id} ${JSON.stringify(a)} desk ${deskX.get(id)}`;
+    }
+    const byProp = new Map();
+    for (const c of d.b.cooler) if (c.phase !== 'back') byProp.set(c.propX, (byProp.get(c.propX) || 0) + 1);
+    for (const n of byProp.values()) maxAt = Math.max(maxAt, n);
+    const at = d.b.cooler.filter((c) => c.phase === 'at');
+    if (d.b.poses.some((p) => p.text === 'SHH')) sawShhPose = true;
+    if (at.length === 2 && at[0].propX === at[1].propX) {
+      sawPair = true;
+      const A = d.ag.find((x) => x.id === at[0].key), O = d.ag.find((x) => x.id === at[1].key);
+      const l = A.x < O.x ? A : O, r = A.x < O.x ? O : A;
+      if (l.facing === 1 && r.facing === -1) pairFacingOk = true;
+    }
+    for (const a of d.ag.filter((x) => x.id === 'cw0' || x.id === 'cw2')) if (a.away || a.sit !== 1 || Math.abs(a.x - deskX.get(a.id)) > 0.6) workerMoved = true;
+    return at;
+  };
+  const t0 = Date.now();
+  const limit = chaos === 0 ? 14000 : 90000;
+  let waitedState = false;
+  while (Date.now() - t0 < limit) {
+    await sleep(chaos === 0 ? 400 : 120);
+    const d = await sample();
+    const at = collect(d);
+    if (at.length >= 2 && d.b.poses.some((p) => p.text && p.text !== 'SHH')) await snap('cooler-chat');
+    if (d.b.poses.some((p) => p.text === 'SHH')) await snap('shh');
+    if (chaos > 0 && !waitedState && at.length >= 1 && events.some((e) => e.act === 'cooler-chat')) {
+      waitedState = true;
+      const who = at[0].key;
+      await load(coolerFixture(false, { [who]: { state: 'waiting' } }));
+      let queued = false, seenAfter = false;
+      for (let i = 0; i < 160 && !queued; i++) {
+        await sleep(150);
+        const d2 = await sample();
+        collect(d2);
+        const me = d2.ag.find((x) => x.id === who);
+        if (!d2.b.cooler.some((c) => c.key === who)) seenAfter = true;
+        queued = !!me && me.queued && seenAfter;
+      }
+      check(queued, `${tag} an agent at the cooler did not go into the queue after its state became waiting`);
+      await load(coolerFixture(false));
+      for (let i = 0; i < 160; i++) {
+        await sleep(150);
+        const d2 = await sample();
+        collect(d2);
+        const me = d2.ag.find((x) => x.id === who);
+        if (me && !me.away && me.sit === 1 && Math.abs(me.x - deskX.get(who)) < 0.6) break;
+      }
+      const d3 = await sample();
+      const me = d3.ag.find((x) => x.id === who);
+      check(!!me && !me.away && me.sit === 1 && Math.abs(me.x - deskX.get(who)) < 0.6, `${tag} the queued agent never came back to its own desk ${JSON.stringify(me)}`);
+    }
+    if (chaos > 0 && waitedState && events.filter((e) => e.act === 'cooler').length >= 6 && events.some((e) => e.act === 'shh') && Date.now() - t0 > 30000 && (!shots || taken.has('shh'))) break;
+  }
+  const bossRes = { scattered: false, woke: false };
+  if (chaos > 0) {
+    for (let att = 0; att < 10 && !bossRes.scattered; att++) {
+      let d = await sample();
+      for (let i = 0; i < 300 && !collect(d).length; i++) { await sleep(120); d = await sample(); }
+      const tAt = d.b.t;
+      await ev(page, () => window.__office.visit('cw0'));
+      const t1 = Date.now();
+      while (Date.now() - t1 < 25000 && !bossRes.scattered) {
+        await sleep(120);
+        d = await sample();
+        collect(d);
+        const sc = events.find((e) => e.act === 'scatter' && e.t >= tAt);
+        if (sc) {
+          bossRes.scattered = true;
+          await snap('boss-scatter');
+          let d2 = d;
+          for (let i = 0; i < 100 && d2.b.t < sc.t + 1.2; i++) { await sleep(60); d2 = await sample(); collect(d2); }
+          const c = d2.b.cooler.find((x) => x.key === sc.key);
+          check(!c || c.phase !== 'at', `${tag} the cooler chatter ${sc.key} was still chatting ${d2.b.t - sc.t}s after the boss walked by`);
+        }
+      }
+      for (let i = 0; i < 120; i++) { await sleep(150); d = await sample(); collect(d); if (!d.b.cooler.length && !(await ev(page, () => window.__office.bossActor().away))) break; }
+    }
+    check(bossRes.scattered, `${tag} the boss walking past never scattered a cooler chat`);
+    for (let att = 0; att < 10 && !bossRes.woke; att++) {
+      let d = await sample();
+      for (let i = 0; i < 400 && !d.b.dozing.length; i++) { await sleep(150); d = await sample(); collect(d); }
+      if (!d.b.dozing.length) break;
+      const tAt = d.b.t, dz = d.b.dozing[0];
+      await ev(page, () => window.__office.visit('ds0'));
+      const t1 = Date.now();
+      while (Date.now() - t1 < 25000 && !bossRes.woke) {
+        await sleep(120);
+        d = await sample();
+        collect(d);
+        const wk = events.find((e) => e.act === 'wake' && e.t >= tAt);
+        if (wk) {
+          bossRes.woke = true;
+          let d2 = d;
+          for (let i = 0; i < 100 && d2.b.t < wk.t + 1; i++) { await sleep(60); d2 = await sample(); }
+          check(!d2.b.dozing.includes(wk.key), `${tag} ${wk.key} kept dozing after the boss walked by (${dz})`);
+          await snap('boss-wake');
+        }
+      }
+      for (let i = 0; i < 120; i++) { await sleep(150); if (!(await ev(page, () => window.__office.bossActor().away))) break; }
+    }
+    check(bossRes.woke, `${tag} the boss walking past never woke a dozer`);
+  }
+  const d = await sample();
+  collect(d);
+  console.log(tag, 'chaos', chaos, 'cooler events', events.filter((e) => e.act === 'cooler').length, 'chats', events.filter((e) => e.act === 'cooler-chat').length, 'shh', events.filter((e) => e.act === 'shh').length, 'maxAt', maxAt);
+  check(!workerMoved, `${tag} a working agent left its desk`);
+  check(maxAt <= 3, `${tag} ${maxAt} agents at one cooler`);
+  check(badReturn === '', `${tag} a cooler visitor did not return to its own desk: ${badReturn}`);
+  if (chaos === 0) {
+    check(events.length === 0 && d.b.cooler.length === 0, `${tag} chaos=0 still acted: ${JSON.stringify(events.slice(0, 3))}`);
+  } else {
+    const trip = events.filter((e) => e.act === 'cooler');
+    check(trip.length > 0 && trip.every((e) => ['ci3', 'ci4', 'ci5', 'di1', 'di2'].includes(e.key)), `${tag} cooler trips missing or by a non-idle agent: ${JSON.stringify(trip.map((e) => e.key))}`);
+    check(events.some((e) => e.act === 'cooler-chat') && sawPair && pairFacingOk, `${tag} no 2-agent cooler chat with the pair facing each other (${sawPair}/${pairFacingOk})`);
+    const said = events.filter((e) => e.act === 'say');
+    check(said.length > 0 && said.every((e) => GENERIC_SAY.includes(e.text)), `${tag} cooler bubbles not generic: ${JSON.stringify(said.map((e) => e.text))}`);
+    const shh = events.filter((e) => e.act === 'shh');
+    check(shh.length > 0 && shh.every((e) => e.key === 'cw0' || e.key === 'cw2' || e.key === 'dw3'), `${tag} no SHH from a working neighbour (${shh.length})`);
+    check(events.filter((e) => e.act === 'cooler-back').length > 0, `${tag} nobody walked back from the cooler`);
+    check(sawShhPose, `${tag} SHH never showed as a bubble`);
+  }
+  check(errors.length === 0, `${tag} cooler console errors ${errors.join('|')}`);
+  await ctx.close();
+}
 if (want('behavior') || want('ui')) {
   await behaviorRun(1280, 720, 'b1280', 3, true);
   await behaviorRun(390, 844, 'b390', 3, true);
   await behaviorRun(1280, 720, 'b0', 0, false);
+}
+if (want('behavior') || want('ui') || want('cooler')) {
+  await coolerRun(1280, 720, 'c1280', 3, true);
+  await coolerRun(390, 844, 'c390', 3, true);
+  await coolerRun(1280, 720, 'c0', 0, false);
 }
 if (want('ui')) {
   const sizes = [[1280, 720], [1920, 1080], [750, 1000], [390, 844]];

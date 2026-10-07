@@ -1,7 +1,7 @@
 {
   "name": "session-orchestrator",
   "displayName": "Session Orchestrator",
-  "version": "0.1.14",
+  "version": "0.1.15",
   "description": "A local pixel-art agent office for your Claude Code sessions: floors are projects, critters are sessions, and the ones waiting for you queue at the Boss Office door.",
   "author": { "name": "marginsystems" },
   "homepage": "https://github.com/marginsystems/session-orchestrator",

@@ -17,14 +17,14 @@ const newMood = function (key, actor, guest) {
     last: TYPE_ONLY ? { act: '', at: 0, chain: 1, root: '', from: '' } : null,
     pose: TYPE_ONLY ? { kind: '', t0: 0, dur: 0, dir: -1 } : null,
     bubble: TYPE_ONLY ? speech('', 0) : null,
-    cool: 0, busy: 0, doze: 0, dozeState: '',
+    cool: 0, busy: 0, doze: 0, dozeState: '', trip: 0, shh: 0,
   };
 };
 const NOMOOD = TYPE_ONLY ? newMood('', B, -1) : null;
 
 const newIntent = (kind, p) => ({ kind, rule: '', act: '', chain: 1, root: '', from: '', delay: 0, span: 0, other: NOMOOD, lean: NOMOOD, ...p });
 
-const CTX = { place: '', chaos: CHAOS, rnd: rng(1), rank: 0, left: NOMOOD, right: NOMOOD, left2: NOMOOD, right2: NOMOOD, near: TYPE_ONLY ? [newMood('', B, -1)] : [] };
+const CTX = { place: '', floor: '', chaos: CHAOS, rnd: rng(1), rank: 0, left: NOMOOD, right: NOMOOD, left2: NOMOOD, right2: NOMOOD, near: TYPE_ONLY ? [newMood('', B, -1)] : [] };
 
 const BH = {
   moods: new Map(TYPE_ONLY ? [['', newMood('', B, -1)]] : []),
@@ -32,6 +32,7 @@ const BH = {
   desk: TYPE_ONLY ? [NOMOOD] : [],
   speaking: TYPE_ONLY ? [newMood('', B, -1)] : [],
   log: TYPE_ONLY ? [{ t: 0, key: '', slot: 0, state: '', act: '', chain: 0, root: '', from: '', text: '' }] : [],
+  visits: new Map(TYPE_ONLY ? [['', newVisit(B, newMood('', B, -1), { id: '', kind: '', x: 0, cell: 0 }, 0)]] : []),
   batch: { t: -9, ranks: new Map(TYPE_ONLY ? [['', 0]] : []) },
 };
 
@@ -114,9 +115,13 @@ const ruleSleepSpreads = function (m, c) {
 };
 
 const RULES = [
+  { name: 'boss-wake', on: 'tick', place: 'desk', run: ruleBossWake },
+  { name: 'boss-scatter', on: 'tick', place: 'cooler', run: ruleBossScatter },
   { name: 'contagion', on: 'tick', place: 'line', run: ruleContagion },
   { name: 'chat', on: 'tick', place: 'line', run: ruleChat },
   { name: 'fidget', on: 'tick', place: 'line', run: ruleFidget },
+  { name: 'shh', on: 'tick', place: 'desk', run: ruleShh },
+  { name: 'water-cooler', on: 'tick', place: 'desk', run: ruleCooler },
   { name: 'sleep-spreads', on: 'tick', place: 'desk', run: ruleSleepSpreads },
   { name: 'shuffle', on: 'move', place: 'line', run: ruleShuffle },
 ];
@@ -172,6 +177,10 @@ const DO = {
     record(m, 'doze', 0, '', '', '');
   },
   shuffle() {},
+  cooler(m, it) { startCooler(m, it.prop); },
+  wake: doWake,
+  scatter: doScatter,
+  shh: doShh,
 };
 
 const runRules = function (m, c, on) {
@@ -225,6 +234,7 @@ const tickDesks = function () {
   for (const [rid, ids] of S.slots) {
     if (!S.floors.includes(rid)) continue;
     D.length = 0;
+    CTX.floor = rid;
     ids.forEach((id, k) => {
       const a = id ? S.agents.get(id) : null;
       const m = a && deskSeated(a, k) ? moodFor(a.id, a, -1) : NOMOOD;
@@ -245,6 +255,7 @@ const tickBehavior = function () {
   if (!CHAOS || quiet()) return;
   tickLine();
   tickDesks();
+  tickCoolers();
   pruneMoods();
 };
 
@@ -289,7 +300,7 @@ const waiterPose = function (m) {
 };
 
 const drawBehaviorBubbles = function () {
-  for (const m of BH.speaking) if (m.bubble) drawBubble({ x: moodX(m), fr: BOSS, inCab: false, bubble: m.bubble });
+  for (const m of BH.speaking) if (m.bubble) drawBubble({ x: moodX(m), fr: m.actor && m.guest < 0 ? m.actor.fr : BOSS, inCab: false, bubble: m.bubble });
 };
 
 const behaviorSnapshot = function () {
@@ -302,6 +313,8 @@ const behaviorSnapshot = function () {
     chaos: CHAOS, cap: CHAIN_CAP, t: S.t, moods: BH.moods.size,
     log: BH.log.map((e) => ({ ...e })),
     poses,
+    cooler: coolerSnapshot(),
+    props: propSnapshot(),
     dozing: [...S.agents.values()].filter(napping).map((a) => a.id),
     traits: [...BH.moods.values()].map((m) => ({ key: m.key, chatty: m.chatty, fidgety: m.fidgety, sleepy: m.sleepy, boredom: m.boredom })),
   };

@@ -152,10 +152,12 @@ const bossVisit = function* (id) {
   const a = S.agents.get(id);
   if (!a || a.gone || a.slot < 0 || a.visitor) return;
   B.away = true;
+  S.visitTarget = id;
   yield* stand(B);
   yield* goTo(B, a.room, slotX(a.room, Math.max(0, a.slot)) - VIS_DX);
   B.facing = 1;
   yield* wait(0.2);
+  yield* until(() => !coolerTripOf(id) && (!a.away || a.gone));
   const mine = speech(BOSS_VISIT_TEXTS[hash(id + S.visits.length + Math.floor(S.t)) % BOSS_VISIT_TEXTS.length], S.t, 15);
   B.bubble = mine;
   a.react = S.t;
@@ -172,6 +174,7 @@ const bossVisit = function* (id) {
   yield* goTo(B, BOSS, bossX());
   yield* sitDown(B);
   B.away = false; B.fr = BOSS; B.x = bossX(); B.sit = 1; B.facing = 1; B.walking = false; B.hop = 0;
+  S.visitTarget = '';
 };
 
 const bossProc = function* () {
@@ -209,7 +212,7 @@ const startTrip = function (fromId, toId, text) {
   if (!target || target.gone || target.slot < 0) return false;
   let a = S.agents.get(fromId);
   if (!a || a.gone) a = makeVisitor();
-  else if (a.away || a.slot < 0) return false;
+  else if ((a.away && !claimCooler(a)) || a.slot < 0) return false;
   spawn(trip(a, toId, up(text)));
   return true;
 };
@@ -252,7 +255,9 @@ const setFocus = function (agentId, at) {
     let a;
     if (agentId === 'visitor' || !target()) a = makeVisitor();
     else {
-      yield* until(() => { const x = target(); return !x || stale() || x.q || (!x.away && x.slot >= 0); });
+      const initial = target();
+      const claimed = initial && claimCooler(initial);
+      yield* until(() => { const x = target(); return !x || stale() || x.q || claimed || (!x.away && x.slot >= 0); });
       a = target();
       if (!a || stale() || a.q) return;
     }
@@ -283,7 +288,7 @@ const queueTask = function* (a) {
   yield* leaveAndSit(a);
 };
 
-const settledAway = (a) => (a.q && a.fr === BOSS && !a.inCab) || a === S.focusVisitor;
+const settledAway = (a) => (a.q && a.fr === BOSS && !a.inCab) || a === S.focusVisitor || coolerSettled(a);
 const activeMovers = (except) => [...S.agents.values()].filter((a) => a.away && a !== except && !settledAway(a)).length + (B.away && except !== B ? 1 : 0);
 
 const syncLine = function () {
@@ -296,7 +301,7 @@ const syncLine = function () {
   for (const id of want) {
     const a = S.agents.get(id);
     if (!a) continue;
-    if (!a.q && !a.away && a.sit > 0.99 && activeMovers() < 3) spawn(queueTask(a));
+    if (!a.q && ((!a.away && a.sit > 0.99) || coolerClaimable(a)) && activeMovers() < 3) { claimCooler(a); spawn(queueTask(a)); }
   }
 };
 
