@@ -65,13 +65,13 @@ node scan.mjs --ensure        # starts the server in the background if it is not
 
 Flags: `--port <n>`, `--anonymize-rooms` (rooms become Room A, B, C, for screen recordings), `--show-titles` (shows session titles as name tags above the critters), `--max <n>` (agent cap, default 30; at most 6 agents per room and 12 rooms).
 
-Floors show the real project folder name (the repo root for a worktree). Session titles are hidden unless you opt in.
+Floors are named after the GitHub repository, or the folder when there is no remote. Session titles are hidden unless you opt in.
 
 ## Settings
 
 Click the gear in the header. The panel is a small retro window over the office.
 
-- **Floor priority**: the list of projects. Drag a row, or use the up and down buttons (or the arrow keys on a focused row). Floor order is priority: the highest priority sits right under the Boss Office, the lowest just above the Lobby. The building re-stacks with the floors sliding into place. Projects you have not ordered go below the ordered ones, most recently active first.
+- **Floor priority**: the list of projects. Drag a row, or use the up and down buttons (or the arrow keys on a focused row). Floor order is priority: the highest priority sits right under the Boss Office, the lowest just above the Lobby. The building re-stacks with the floors sliding into place. Projects you have not ordered go below the ordered ones, alphabetically, the same order as the Claude Code sidebar when it groups sessions by project. Floors are named like the sidebar too: the GitHub repository name, or the folder name when there is no remote.
 - **Anonymize rooms**: hides project names (Room A, B, C).
 - **Show session titles**: shows a small name tag above each critter.
 - **Demo speed**: 1x, 2x or 3x, for the demo.

@@ -3,7 +3,7 @@ import { readFileSync, readdirSync, statSync, openSync, readSync, closeSync, wri
 import { spawn } from 'node:child_process';
 import { request } from 'node:http';
 import { homedir } from 'node:os';
-import { join, basename, dirname } from 'node:path';
+import { join, basename, dirname, resolve as resolvePath } from 'node:path';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { isHumanPrompt } from './lib/prompts.mjs';
@@ -80,15 +80,22 @@ function readTail(path, size) {
 
 const CWD_RE = /"cwd":"((?:[^"\\]|\\.)*)"/g;
 
-function lastCwd(text) {
+const slugOf = (cwd) => cwd.replace(/[^A-Za-z0-9]/g, '-');
+
+function lastCwd(text, slug) {
   let last = null;
-  for (const m of text.matchAll(CWD_RE)) last = m[1];
-  if (last === null) return null;
-  try {
-    return JSON.parse('"' + last + '"');
-  } catch {
-    return null;
+  let launch = null;
+  for (const m of text.matchAll(CWD_RE)) {
+    let cwd;
+    try {
+      cwd = JSON.parse('"' + m[1] + '"');
+    } catch {
+      continue;
+    }
+    last = cwd;
+    if (slugOf(cwd) === slug) launch = cwd;
   }
+  return launch || last;
 }
 
 const MSG_RE = /<cross-session-message[^>]*?from-session=\\?"(local_[0-9a-fA-F-]+)\\?"/g;
@@ -96,8 +103,9 @@ const TS_RE = /"timestamp":"([^"]+)"/;
 
 function analyzeFile(path, size) {
   const tail = readTail(path, size);
-  let cwd = lastCwd(tail);
-  if (!cwd) cwd = lastCwd(readRange(path, 0, Math.min(size, HEAD_BYTES)));
+  const slug = basename(dirname(path));
+  let cwd = lastCwd(tail, slug);
+  if (!cwd || slugOf(cwd) !== slug) cwd = lastCwd(readRange(path, 0, Math.min(size, HEAD_BYTES)), slug) || cwd;
   let last;
   const messages = [];
   const prompts = [];
@@ -214,9 +222,32 @@ function roomRoot(cwd) {
   return m && m[1] ? m[1] : cwd.replace(/\/+$/, '') || '/';
 }
 
+const REMOTE_RE = /\[remote "origin"\][^[]*?\burl\s*=\s*(\S+)/;
+const repoNames = new Map();
+
+function repoName(root) {
+  if (repoNames.has(root)) return repoNames.get(root);
+  let name = '';
+  try {
+    let gitDir = join(root, '.git');
+    if (statSync(gitDir).isFile()) {
+      const dir = resolvePath(root, readFileSync(gitDir, 'utf8').replace(/^gitdir:\s*/, '').trim());
+      let common = '';
+      try {
+        common = readFileSync(join(dir, 'commondir'), 'utf8').trim();
+      } catch {}
+      gitDir = common ? resolvePath(dir, common) : dir;
+    }
+    const m = REMOTE_RE.exec(readFileSync(join(gitDir, 'config'), 'utf8'));
+    if (m) name = basename(m[1].replace(/\/+$/, '')).replace(/\.git$/, '');
+  } catch {}
+  repoNames.set(root, name);
+  return name;
+}
+
 function roomLabel(root) {
   if (root === homedir()) return 'home';
-  return basename(root) || '/';
+  return repoName(root) || basename(root) || '/';
 }
 
 
@@ -387,7 +418,6 @@ function scan(now = Date.now()) {
   }
   picked.sort((a, b) => b.mtime - a.mtime);
 
-  for (const s of picked) s.room.latest = Math.max(s.room.latest || 0, s.mtime);
 
   const names = new Set();
   const byUuid = new Map();
@@ -437,7 +467,7 @@ function scan(now = Date.now()) {
   const ordered = [...rooms.values()].sort((a, b) => {
     const ra = priorityRank(a), rb = priorityRank(b);
     if (ra !== rb) return ra < rb ? -1 : 1;
-    return b.latest - a.latest;
+    return roomLabel(a.root).localeCompare(roomLabel(b.root));
   });
   const outRooms = ordered.map((r, i) => ({
     id: r.id,

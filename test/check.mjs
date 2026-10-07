@@ -467,6 +467,7 @@ function makeFixture(root) {
       const lines = [{ type: 'user', userType: 'external', cwd: '/work/' + project, timestamp: ts, message: { role: 'user', content: 'task ' + n } }];
       if (kind === 'tool_use') lines.push({ type: 'assistant', cwd: '/work/' + project, timestamp: ts, message: { content: [{ type: 'tool_use', id: 't' + n, name: 'Bash', input: {} }] } });
       else if (kind === 'reply') lines.push({ type: 'assistant', cwd: '/work/' + project, timestamp: ts, message: { content: [{ type: 'text', text: 'done' }] } });
+      if (kind === 'reply') lines.push({ type: 'user', cwd: '/work/' + project + '/bench/t1', timestamp: ts, toolUseResult: {}, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'x', content: 'ok' }] } }, { type: 'assistant', cwd: '/work/' + project + '/bench/t1', timestamp: ts, message: { content: [{ type: 'text', text: 'done' }] } });
       const file = join(dir, uuid + '.jsonl');
       writeFileSync(file, lines.map((l) => JSON.stringify(l)).join('\n') + '\n');
       const at = new Date(Date.now() - ageSec * 1000);
@@ -575,7 +576,7 @@ if (want('server')) {
   let server = startServer(fixtureHome, SPORT);
   await sleep(1500);
   let s = await stateOf(SPORT);
-  check(s.rooms.map((r) => r.label).join() === 'atlas,delta,beacon,citadel', `server default room order ${s.rooms.map((r) => r.label)}`);
+  check(s.rooms.map((r) => r.label).join() === 'atlas,beacon,citadel,delta', `server default room order ${s.rooms.map((r) => r.label)}`);
   check(!s.events.some((e) => e.kind === 'join'), 'server emitted join events for sessions that existed at startup');
   const expectDefault = [ids.atlas300, ids.delta400, ids.beacon380, ids.beacon200, ids.citadel240];
   check(JSON.stringify(s.queue) === JSON.stringify(expectDefault), `server default queue ${JSON.stringify(s.queue)} != ${JSON.stringify(expectDefault)}`);
@@ -660,7 +661,7 @@ if (want('server')) {
   const joins = s.events.filter((e) => e.kind === 'join');
   check(joins.length === 1 && joins[0].agentId === agentId(echoUuid), `join events wrong: ${JSON.stringify(joins)}`);
   check(s.rooms.some((room) => room.label === 'echo'), 'new project missing from rooms');
-  check(s.rooms.map((room) => room.label).slice(0, 3).join() === 'citadel,beacon,echo', `new project not placed after the listed floors by activity: ${s.rooms.map((room) => room.label)}`);
+  check(s.rooms.map((room) => room.label).slice(0, 3).join() === 'citadel,beacon,atlas', `unlisted floors not alphabetical after the listed ones: ${s.rooms.map((room) => room.label)}`);
   const focusDir = join(fixtureHome, '.session-orchestrator');
   writeFileSync(join(focusDir, 'focus.json'), JSON.stringify({ sessionId: fixture.find((f) => f.project === 'beacon' && f.ageSec === 200).uuid, at: nowIso() }));
   s = await waitState(SPORT, (st) => st.focus && st.focus.agentId);
@@ -724,7 +725,7 @@ if (want('live')) {
     const { ctx, page, errors } = await open(1280, 720, 1, base, 2500);
     check(!(await uiState(page)).tour, 'onboarding shown again after it was finished');
     const labels = await ev(page, () => window.__office.rooms().map((r) => r.label));
-    check(labels.join() === 'delta,atlas,beacon,citadel', `live floors show ${labels} (the tour reordered the first two)`);
+    check(labels.join() === 'beacon,atlas,citadel,delta', `live floors show ${labels} (the tour reordered the first two)`);
     const plaques = await ev(page, () => window.__office.labels().map((l) => l.id));
     check(plaques.length > 0, 'no plaques');
     await sleep(500);
@@ -741,13 +742,13 @@ if (want('live')) {
     await sleep(1400);
     check(!(await ev(page, () => window.__office.animating())), 're-stack animation never finished');
     const after = await ev(page, () => window.__office.rooms().map((r) => r.label));
-    check(after.join() === 'atlas,delta,beacon,citadel', `priority change gave ${after}`);
+    check(after.join() === 'atlas,beacon,citadel,delta', `priority change gave ${after}`);
     const floorsNow = await ev(page, () => window.__office.floors());
     check(floorsNow.every((f) => Math.abs(f.y - f.top) < 0.01), 'floors not settled at their slots');
     check(floorsNow.filter((f) => f.id[0] === 'r').map((f) => f.id).join() === (await ev(page, () => window.__office.rooms().map((r) => r.id))).join(), 'floor stacking differs from priority order');
     await sleep(600);
     const served = JSON.parse((await httpReq(LPORT, { path: '/state.json' })).text);
-    check(served.rooms.map((r) => r.label).join() === 'atlas,delta,beacon,citadel', 'server state does not reflect the UI priority change');
+    check(served.rooms.map((r) => r.label).join() === 'atlas,beacon,citadel,delta', 'server state does not reflect the UI priority change');
     const disk = JSON.parse(readFileSync(settingsFile, 'utf8'));
     check(disk.order.join() === served.rooms.map((r) => r.id).join(), 'settings.json order does not match floors');
     await page.locator('[data-id="tg:anonymize"]').click();
@@ -767,7 +768,7 @@ if (want('live')) {
   {
     const { ctx, page, errors } = await open(1280, 720, 1, base, 3000);
     const labels = await ev(page, () => window.__office.rooms().map((r) => r.label));
-    check(labels.join() === 'atlas,delta,beacon,citadel', `priority lost after reload: ${labels}`);
+    check(labels.join() === 'atlas,beacon,citadel,delta', `priority lost after reload: ${labels}`);
     const q = await queueWait(page);
     const expect = [ids.atlas300, ids.delta400, ids.beacon380, ids.beacon200, ids.citadel240].filter((id) => q.queue.includes(id));
     check(JSON.stringify(q.queue) === JSON.stringify(expect), `browser queue ${JSON.stringify(q.queue)} != ${JSON.stringify(expect)}`);
