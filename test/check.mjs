@@ -748,6 +748,17 @@ const serverJob = async () => {
   writeFileSync(join(focusDir, 'focus.json'), JSON.stringify({ sessionId: fixture.find((f) => f.project === 'beacon' && f.ageSec === 200).uuid, at: nowIso() }));
   s = await waitState(SPORT, (st) => st.focus && st.focus.agentId);
   check(s.focus && s.focus.agentId === ids.beacon200, 'focus.json not mapped to the agent');
+  const focusedFile = fixture.find((f) => f.project === 'beacon' && f.ageSec === 200).file;
+  const later = () => new Date(Date.now() + 2000).toISOString();
+  appendFileSync(focusedFile, JSON.stringify({ type: 'user', userType: 'external', isMeta: true, cwd: '/work/beacon', timestamp: later(), message: { role: 'user', content: 'Another Claude session sent a message:\n<cross-session-message from="local_0a1b2c3d-0000-4000-8000-00000000abcd" name="Orchestrator">go ahead</cross-session-message>' } }) + '\n');
+  s = await waitState(SPORT, (st) => !st.focus);
+  check(!s.focus, 'focus kept after the focused session got a message');
+  writeFileSync(join(focusDir, 'focus.json'), JSON.stringify({ sessionId: fixture.find((f) => f.project === 'beacon' && f.ageSec === 200).uuid, at: later() }));
+  s = await waitState(SPORT, (st) => st.focus && st.focus.agentId);
+  check(s.focus && s.focus.agentId === ids.beacon200, 'a fresh focus was ended by an older message');
+  appendFileSync(focusedFile, JSON.stringify({ type: 'user', userType: 'external', cwd: '/work/beacon', timestamp: new Date(Date.now() + 4000).toISOString(), message: { role: 'user', content: 'ship it' } }) + '\n');
+  s = await waitState(SPORT, (st) => !st.focus);
+  check(!s.focus, 'focus kept after the user prompted the focused session');
   say('server ok');
   server.kill();
 
