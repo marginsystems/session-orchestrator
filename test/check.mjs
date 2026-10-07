@@ -360,17 +360,19 @@ async function joinCheck(page, tag, newProject) {
   const id = joined.id;
   check(!!id, `${tag} join hook returned nothing`);
   check(joined.pendingDesk, `${tag} join never showed the pending desk`);
-  let cab = false, seated = false, sawAnim = false;
+  let cab = false, seated = false, sawAnim = false, doorOpen = false;
   for (let i = 0; i < 900; i++) {
     await nap(page, 100);
-    const s = await page.evaluate((i2) => { const o = window.__office; return { a: o.agents().find((x) => x.id === i2), desks: o.desks(), anim: o.animating() }; }, id);
+    const s = await page.evaluate((i2) => { const o = window.__office; return { a: o.agents().find((x) => x.id === i2), desks: o.desks(), anim: o.animating(), door: o.lobbyDoor().open }; }, id);
     if (s.anim) sawAnim = true;
+    if (s.door > 0.9) doorOpen = true;
     if (!s.a) continue;
     if (s.a.inCab) cab = true;
     if (!s.a.away && s.a.sit === 1) { seated = true; break; }
   }
   check(seated, `${tag} new agent never sat down`);
   check(cab, `${tag} new agent skipped the elevator`);
+  check(doorOpen, `${tag} lobby door never opened for the new agent`);
   const d = await staticChecks(page, tag + ' after join');
   const mine = d.desks.find((k) => k.id === id);
   check(!!mine, `${tag} no desk for the new agent`);
@@ -1285,11 +1287,14 @@ async function leaveCheck(vw, vh, tag) {
   check(base.d === 8 && base.ag === 8, `${tag} leave setup has ${base.d} desks, ${base.ag} agents`);
   await feed({ agents: ['r1_a0'] });
   const start = await page.evaluate(() => window.__office.agents().find((a) => a.id === 'r1_a0'));
-  let closer = false, cab = false, deskKept = false, goneAt = -1, shot = false;
-  for (let i = 0; i < 100; i++) {
+  let closer = false, cab = false, deskKept = false, goneAt = -1, shot = false, atDoor = false, doorOpen = false, doorShot = false;
+  for (let i = 0; i < 250; i++) {
     await nap(page, 100);
-    const s = await page.evaluate(() => ({ a: window.__office.agents().find((a) => a.id === 'r1_a0'), desk: window.__office.desks().some((d) => d.id === 'r1_a0'), n: window.__office.agents().length }));
+    const s = await page.evaluate(() => ({ a: window.__office.agents().find((a) => a.id === 'r1_a0'), desk: window.__office.desks().some((d) => d.id === 'r1_a0'), n: window.__office.agents().length, door: window.__office.lobbyDoor() }));
+    if (s.door.open > 0.9) doorOpen = true;
     if (!s.a) { goneAt = i; break; }
+    if (s.a.x <= s.door.x + 6) atDoor = true;
+    if (!doorShot && s.door.open > 0.5) { doorShot = true; await page.screenshot({ path: join(SHOTS, `leave-anims-${tag}-door.png`) }); }
     if (i < 4 && s.desk && s.a) deskKept = true;
     if (Math.abs(s.a.x - base.x) < Math.abs(start.x - base.x) - 8 || s.a.inCab) closer = true;
     if (s.a.inCab) cab = true;
@@ -1298,6 +1303,10 @@ async function leaveCheck(vw, vh, tag) {
   check(deskKept, `${tag} desk vanished as soon as the agent was removed`);
   check(closer && cab, `${tag} removed agent did not walk to the elevator and board (closer ${closer}, cab ${cab})`);
   check(goneAt > 3 && goneAt >= 0, `${tag} removed agent vanished at once or never left (${goneAt})`);
+  check(atDoor && doorOpen, `${tag} removed agent did not leave through the lobby door (at door ${atDoor}, door opened ${doorOpen})`);
+  await nap(page, 1200);
+  const shut = await page.evaluate(() => window.__office.lobbyDoor().open);
+  check(shut === 0, `${tag} lobby door did not close after the agent left (${shut})`);
   const after = await page.evaluate(() => ({ d: window.__office.desks().map((d) => d.id), ag: window.__office.agents().length }));
   check(!after.d.includes('r1_a0') && after.ag === 7, `${tag} desk not freed after the agent left`);
   const back = leaveState({});
