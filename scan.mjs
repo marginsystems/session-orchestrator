@@ -119,14 +119,17 @@ function analyzeFile(path, size) {
       continue;
     }
     const content = o.message && o.message.content;
-    if (o.type === 'user' && !o.isSidechain && typeof content === 'string' && content.includes('<cross-session-message')) {
+    const texts = typeof content === 'string' ? [content] : Array.isArray(content) && !content.some((b) => b && b.type === 'tool_result') ? content.filter((b) => b && b.type === 'text' && typeof b.text === 'string').map((b) => b.text) : [];
+    if (o.type === 'user' && !o.isSidechain && texts.some((text) => text.includes('<cross-session-message'))) {
       const at = Date.parse(o.timestamp);
       if (Number.isFinite(at)) {
-        for (const m of content.matchAll(MSG_RE)) {
-          const key = m[1] + ':' + Math.floor(at / 10000);
-          if (!seen.has(key)) {
-            seen.add(key);
-            messages.push({ from: m[1], at });
+        for (const text of texts) {
+          for (const m of text.matchAll(MSG_RE)) {
+            const key = m[1] + ':' + Math.floor(at / 10000);
+            if (!seen.has(key)) {
+              seen.add(key);
+              messages.push({ from: m[1], at });
+            }
           }
         }
       }
