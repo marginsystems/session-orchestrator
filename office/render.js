@@ -304,7 +304,7 @@ const drawCab = function (t) {
 };
 
 const drawLobbyDoor = function () {
-  if (LD.open < 0.02 || !S.floors.includes(LOBBY)) return;
+  if (!S.floors.includes(LOBBY)) return;
   const fy = topNow(LOBBY) + S.Hf - FB, x = BM + 6, w = 16, h = 30, y = fy - h;
   R(ctx, x, y, w, h, S.sky === 'night' ? '8' : S.sky === 'dusk' ? '3' : 'b');
   R(ctx, x, fy - 4, w, 4, S.sky === 'night' ? '7' : '6');
