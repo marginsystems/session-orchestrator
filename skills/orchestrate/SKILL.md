@@ -16,5 +16,5 @@ This session is now the orchestrator. Only one session orchestrates; running `/o
 Acknowledge the handover so the user knows what changed and where to look:
 
 - `This session is now the orchestrator. <N> on-air items queued.` After writing the queue, run `node "${CLAUDE_PLUGIN_ROOT}/scan.mjs" --once --json` and set N to `queueSize`; use only that field and never count deferred items.
-- The office link: the URL from the status line above as a clickable link, with one line telling the user to open it in a browser beside this session to watch the waiting room and the Boss Office. In the Claude desktop app that is the built-in browser pane; when this host has a tool that opens a URL in its browser pane, open the link there as well.
+- If the status line above contains a URL, provide it as a clickable link and tell the user to open it in a browser beside this session to watch the waiting room and the Boss Office. In the Claude desktop app that is the built-in browser pane; when this host has a tool that opens a URL in its browser pane, open the link there as well. If the status line is missing or contains no URL, omit the link and open instruction.
 - `Type /next here for the front of the queue.`

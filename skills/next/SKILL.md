@@ -17,7 +17,7 @@ The `SESSION_ID`, `TITLE`, and `PROJECT` values are JSON string literals; `TITLE
 
 `QUEUE_INDEX` is the position of the item in the queue. It is usually `0`, the front. While streamer mode is on, items that are not on stream are deferred and `QUEUE_INDEX` skips them. Never mention, count or show deferred items, and ignore `DEFERRED`: the chat may be on stream.
 
-Every response, including early-stop and non-orchestrator replies, must end with `Office: [<URL>](<URL>)` using the URL from the `--ensure` status line.
+If the `--ensure` status line contains a URL, every response must end with `Office: [<URL>](<URL>)` using that URL. If there is no status line or it contains no URL, omit the Office line.
 
 If the output is `QUEUE: empty`, say `Queue is empty.` and stop. If it is `QUEUE: nothing on air`, say `Nothing on air in the queue.` and stop, the same way. Do not request usage, write focus, or modify the queue. If `SESSION_ID` is `"none"`, there is no session; do not request usage or write focus. Write `Session: none` and use the context fallback. If `TITLE_AVAILABLE` is `false`, say `Exact session title unavailable; item left in queue.` and stop. Do not request usage, write focus, or modify the queue.
 
