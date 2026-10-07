@@ -504,6 +504,67 @@ function probe() {
   });
 }
 
+function contextTokens(path, size) {
+  let last = 0;
+  for (const line of readTail(path, size).split('\n')) {
+    let usage;
+    try { usage = JSON.parse(line).message?.usage; } catch { continue; }
+    if (usage && Number.isFinite(usage.input_tokens) && Number.isFinite(usage.cache_creation_input_tokens) && Number.isFinite(usage.cache_read_input_tokens)) {
+      last = usage.input_tokens + usage.cache_creation_input_tokens + usage.cache_read_input_tokens;
+    }
+  }
+  return last;
+}
+
+function nextInfo() {
+  const now = Date.now();
+  const desktop = desktopSessions();
+  let items = [];
+  try {
+    const f = JSON.parse(readFileSync(QUEUE_FILE, 'utf8'));
+    const at = Date.parse(f.at);
+    if (Number.isFinite(at) && at <= now + 60000 && now - at < FOCUS_MAX_MS && Array.isArray(f.items)) items = f.items.slice(0, QUEUE_MAX);
+  } catch {}
+  const item = items[0];
+  if (!item) return 'QUEUE: empty';
+  const sid = typeof item === 'string' ? item : item && typeof item.sessionId === 'string' ? item.sessionId : '';
+  if (!sid) return 'SESSION_ID: "none"\nTITLE: "none"\nPROJECT: "none"\nCONTEXT_TOKENS: 0';
+  const rec = sid.startsWith('local_') ? desktop.get(sid) : [...desktop.values()].find((r) => r.cli === sid);
+  const uuid = toUuid(sid, desktop);
+  let file = '';
+  try {
+    for (const d of readdirSync(PROJECTS)) {
+      const p = join(PROJECTS, d, uuid + '.jsonl');
+      try {
+        if (statSync(p).isFile()) { file = p; break; }
+      } catch {}
+    }
+  } catch {}
+  let project = 'unknown', tokens = 0;
+  if (file) {
+    let st;
+    try { st = statSync(file); } catch {}
+    if (st) {
+      const info = analyzeCached(file, st);
+      if (info.cwd) project = roomLabel(roomRoot(info.cwd));
+      tokens = contextTokens(file, st.size);
+    }
+  }
+  return [
+    'SESSION_ID: ' + JSON.stringify(sid),
+    'TITLE: ' + JSON.stringify(rec && rec.title ? String(rec.title) : 'unknown'),
+    'TITLE_AVAILABLE: ' + Boolean(rec && rec.title),
+    'PROJECT: ' + JSON.stringify(project),
+    'CONTEXT_TOKENS: ' + (tokens || 'unknown'),
+    'CHECKED_AT: ' + new Date(now).toISOString(),
+  ].join('\n');
+}
+
+if (flag('--next-info')) {
+  console.log(nextInfo());
+  process.exit(0);
+}
+
 if (flag('--ensure')) {
   if (!(await probe())) {
     const child = spawn(process.execPath, [fileURLToPath(import.meta.url), ...argv.filter((a) => a !== '--ensure')], { detached: true, stdio: 'ignore' });

@@ -86,7 +86,7 @@ The first time you open the office, the Boss walks you through six short steps: 
 
 ## Orchestrator: `/orchestrate` and `/next`
 
-Run `/orchestrate` in one session to make it the orchestrator; running it in another session hands the job over. In that session, `/next` brings the front of the queue into the Boss Office.
+Run `/orchestrate` in one session to make it the orchestrator; running it in another session hands the job over. In that session, `/next` brings the front of the queue into the Boss Office. Every item `/next` shows names its session exactly as the sidebar does, with its project and how full its context window is (`node scan.mjs --next-info` prints the title, project and token count for the front of the queue).
 
 ## The `next` contract
 

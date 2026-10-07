@@ -1,5 +1,5 @@
 import { createRequire } from 'node:module';
-import { spawn } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { mkdirSync, mkdtempSync, writeFileSync, appendFileSync, utimesSync, readFileSync, existsSync, rmSync } from 'node:fs';
@@ -633,6 +633,8 @@ const serverJob = async () => {
   const expectDefault = [ids.atlas300, ids.delta400, ids.beacon380, ids.beacon200, ids.citadel240];
   check(JSON.stringify(s.queue) === JSON.stringify(expectDefault), `server default queue ${JSON.stringify(s.queue)} != ${JSON.stringify(expectDefault)}`);
   check(s.queueSize === 6, `queueSize ${s.queueSize} is not the number of items in queue.json`);
+  const info = execFileSync('node', [join(ROOT, 'scan.mjs'), '--next-info'], { env: { ...process.env, HOME: fixtureHome }, encoding: 'utf8' });
+  check(/^SESSION_ID: "local_fixture1"$/m.test(info) && /^TITLE: "Tidy the parser"$/m.test(info) && /^PROJECT: "atlas"$/m.test(info) && /^CONTEXT_TOKENS: /m.test(info), `--next-info output wrong: ${info}`);
   check(s.line.length === 6 && s.line[1] === null && JSON.stringify(s.line.filter((id) => id)) === JSON.stringify(expectDefault), `waiting room line ${JSON.stringify(s.line)}`);
   const raw = JSON.stringify(s);
   check(!raw.includes('/work') && !raw.includes(fixtureHome) && !/"title"/.test(raw), 'state.json leaks paths or titles by default');
