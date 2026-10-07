@@ -751,6 +751,27 @@ const serverJob = async () => {
 
 };
 
+const goneJob = async () => {
+  const home = mkdtempSync(join(tmpdir(), 'so-gone-'));
+  const fx = makeFixture(home);
+  const env = { env: { ...process.env, HOME: home }, encoding: 'utf8' };
+  const nextInfo = () => execFileSync('node', [join(ROOT, 'scan.mjs'), '--next-info'], env);
+  const state = () => JSON.parse(execFileSync('node', [join(ROOT, 'scan.mjs'), '--once', '--json'], env));
+  writeQueue(home, ['local_archived1', 'local_deleted1', 'local_fixture1', null]);
+  let info = nextInfo();
+  check(/^GONE: 0,1$/m.test(info) && /^QUEUE_INDEX: 2$/m.test(info) && /^TITLE: "Tidy the parser"$/m.test(info), `gone --next-info ${info}`);
+  let s = state();
+  check(s.queueSize === 2 && s.line.length === 2 && s.line[0] === fx[0].id && s.line[1] === null && s.deferred === 0, `gone waiting room ${JSON.stringify([s.line, s.queueSize, s.deferred])}`);
+  writeQueue(home, ['local_archived1', 'local_deleted1']);
+  info = nextInfo();
+  check(info.trim() === 'GONE: 0,1\nQUEUE: empty', `all gone --next-info ${info}`);
+  s = state();
+  check(s.queueSize === 0 && s.line.length === 0, `all gone waiting room ${JSON.stringify([s.line, s.queueSize])}`);
+  writeQueue(home, ['local_fixture1']);
+  check(!/GONE/.test(nextInfo()), 'GONE printed with no gone items');
+  say('gone ok');
+};
+
 const streamerJob = async () => {
   const home = mkdtempSync(join(tmpdir(), 'so-stream-'));
   const fx = makeFixture(home);
@@ -1651,6 +1672,7 @@ const add = (name, groups, fn, quick = false) => {
 add('server', ['server'], serverJob, true);
 add('crowd', ['server'], crowdJob, true);
 add('streamer', ['server'], streamerJob, true);
+add('gone', ['server'], goneJob, true);
 add('live', ['live'], liveJob, true);
 add('leave l1280', ['leave', 'ui'], () => leaveCheck(1280, 720, 'l1280'), true);
 add('leave l390', ['leave', 'ui'], () => leaveCheck(390, 844, 'l390'));
