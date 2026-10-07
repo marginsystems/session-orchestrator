@@ -195,12 +195,6 @@ const leaveTask = function* (a) {
   freeSeat(a);
 };
 
-const fadeTask = function* (a) {
-  yield* tween(0.5, (p) => { if (a.gone) a.alpha = 1 - p; });
-  if (a.gone) S.agents.delete(a.id); else a.alpha = 1;
-  freeSeat(a);
-};
-
 const trip = function* (a, bid, text) {
   a.away = true;
   if (a.visitor) { a.fr = LOBBY; a.x = BM + 14; a.sit = 0; a.facing = 1; yield* wait(0.2); }

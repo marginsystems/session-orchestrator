@@ -109,7 +109,7 @@ const applyState = function (raw) {
   else { snapSeated(); if (recount) drawStatic(); }
   if (reorder) beginAnim(oldFloors, added, ghosts, oldLH, oldSlots);
   for (const a of joiners) spawn(joinTask(a));
-  leavers.forEach((a, k) => spawn(k < 3 ? leaveTask(a) : fadeTask(a)));
+  leavers.forEach((a) => spawn(leaveTask(a)));
   UI.dirty = true;
   maybeStartTour();
 };
