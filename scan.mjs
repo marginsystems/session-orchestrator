@@ -300,6 +300,12 @@ function readFocus(now, desktop) {
   return null;
 }
 
+const sessionGone = (sid, desktop) => {
+  if (typeof sid !== 'string' || !sid || !desktop.size) return false;
+  const rec = sid.startsWith('local_') ? desktop.get(sid) : [...desktop.values()].find((r) => r.cli === sid);
+  return sid.startsWith('local_') ? !rec || rec.archived === true : Boolean(rec && rec.archived);
+};
+
 const toUuid = (sid, desktop) => {
   if (typeof sid !== 'string' || !sid) return '';
   const uuid = sid.startsWith('local_') ? (desktop.get(sid) || {}).cli : sid;
@@ -310,19 +316,23 @@ function readQueue(now, desktop, source) {
   try {
     const f = source === undefined ? JSON.parse(readFileSync(QUEUE_FILE, 'utf8')) : source;
     const at = Date.parse(f.at);
-    if (!Number.isFinite(at) || at > now + 60000 || now - at >= FOCUS_MAX_MS || !Array.isArray(f.items)) return { uuids: [], slots: [], size: 0, orchestrator: '' };
+    if (!Number.isFinite(at) || at > now + 60000 || now - at >= FOCUS_MAX_MS || !Array.isArray(f.items)) return { uuids: [], slots: [], gone: [], size: 0, orchestrator: '' };
     const items = f.items.slice(0, QUEUE_MAX);
     const uuids = [];
     const slots = [];
+    const gone = [];
     for (const it of items) {
-      const uuid = toUuid(typeof it === 'string' ? it : it && it.sessionId, desktop);
+      const sid = typeof it === 'string' ? it : it && it.sessionId;
+      const isGone = sessionGone(sid, desktop);
+      const uuid = isGone ? '' : toUuid(sid, desktop);
       const fresh = uuid !== '' && !uuids.includes(uuid);
       if (fresh) uuids.push(uuid);
       slots.push(fresh ? uuid : '');
+      gone.push(isGone);
     }
-    return { uuids, slots, size: items.length, orchestrator: toUuid(f.orchestrator, desktop) };
+    return { uuids, slots, gone, size: items.length - gone.filter(Boolean).length, orchestrator: toUuid(f.orchestrator, desktop) };
   } catch {
-    return { uuids: [], slots: [], size: 0, orchestrator: '' };
+    return { uuids: [], slots: [], gone: [], size: 0, orchestrator: '' };
   }
 }
 
@@ -438,7 +448,7 @@ function scanFull(now = Date.now(), queueSource) {
   }
   picked.sort((a, b) => b.mtime - a.mtime);
   const airUuids = new Set(picked.filter((s) => !streaming || air.has(s.room.id)).map((s) => s.uuid));
-  const slotOnAir = queueFile.slots.map((u) => !streaming || (u !== '' && airUuids.has(u)));
+  const slotOnAir = queueFile.slots.map((u, i) => !queueFile.gone[i] && (!streaming || (u !== '' && airUuids.has(u))));
   const queuedAir = queued.filter((u) => airUuids.has(u));
   const waitingSet = new Set(queuedAir);
 
@@ -548,14 +558,17 @@ function nextInfo() {
     if (Number.isFinite(at) && at <= now + 60000 && now - at < FOCUS_MAX_MS && Array.isArray(queueSource.items)) items = queueSource.items.slice(0, QUEUE_MAX);
   } catch {}
   if (!items.length) return 'QUEUE: empty';
-  let index = 0;
+  const gone = readQueue(now, desktop, queueSource).gone;
+  const goneLine = gone.some(Boolean) ? 'GONE: ' + gone.flatMap((g, i) => (g ? [i] : [])).join(',') + '\n' : '';
+  let index = gone.findIndex((g) => !g);
+  if (index < 0) return goneLine + 'QUEUE: empty';
   if (settings.streamer) {
     const eligible = scanFull(now, queueSource).slotOnAir;
     index = eligible.findIndex((ok) => ok);
-    if (index < 0) return 'QUEUE: nothing on air';
+    if (index < 0) return goneLine + 'QUEUE: nothing on air';
   }
   const item = items[index];
-  const prefix = ['QUEUE_INDEX: ' + index, ...(settings.streamer ? ['DEFERRED: ' + index] : [])].join('\n') + '\n';
+  const prefix = goneLine + ['QUEUE_INDEX: ' + index, ...(settings.streamer ? ['DEFERRED: ' + index] : [])].join('\n') + '\n';
   const sid = typeof item === 'string' ? item : item && typeof item.sessionId === 'string' ? item.sessionId : '';
   if (!sid) return prefix + 'SESSION_ID: "none"\nTITLE: "none"\nPROJECT: "none"\nCONTEXT_TOKENS: 0';
   const rec = sid.startsWith('local_') ? desktop.get(sid) : [...desktop.values()].find((r) => r.cli === sid);
