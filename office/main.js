@@ -69,7 +69,7 @@ window['__office'] = {
   trip: (fromId, toId, text) => startTrip(fromId, toId || '', text || TEXTS[0]),
   dim: () => S.dim,
   queue: () => ({ queue: S.queue.slice(), size: S.queueSize, line: S.line.slice(), guests: S.line.filter((id) => id === null).length, want: S.want.slice(), cap: lineCap(), door: doorX(), hall: hallW(), spots: S.want.map((id) => lineX(slotOf(id))), foot: footY(0), spot: bossSpot() }),
-  rooms: () => S.rooms.map((r) => ({ id: r.id, label: r.label })),
+  rooms: () => S.rooms.map((r) => ({ id: r.id, label: r.label, offAir: r.offAir })),
   load: (st) => { applyState(st); return true; },
   layouts: () => S.layouts,
   fold: (t) => fold(t),

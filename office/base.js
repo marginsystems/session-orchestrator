@@ -145,7 +145,7 @@ const context2d = function (canvas) {
   return c;
 };
 const TYPE_ONLY = false;
-const DEF_SET = { order: TYPE_ONLY ? [''] : [], anonymize: false, titles: false, speed: 1, sound: false, onboardedAt: TYPE_ONLY ? '' : null };
+const DEF_SET = { order: TYPE_ONLY ? [''] : [], anonymize: false, titles: false, speed: 1, sound: false, onboardedAt: TYPE_ONLY ? '' : null, streamer: false, onAir: TYPE_ONLY ? [''] : [] };
 
 const R = (c, x, y, w, h, col) => { c.fillStyle = PAL[col] || col; c.fillRect(Math.round(x), Math.round(y), Math.round(w), Math.round(h)); };
 const px = (c, x, y, col) => R(c, x, y, 1, 1, col);

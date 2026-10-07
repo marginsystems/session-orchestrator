@@ -251,7 +251,7 @@ function roomLabel(root) {
 }
 
 
-const DEFAULT_SETTINGS = { order: new Array(), anonymize: false, titles: false, speed: 1, sound: false, onboardedAt: null };
+const DEFAULT_SETTINGS = { order: new Array(), anonymize: false, titles: false, speed: 1, sound: false, onboardedAt: null, streamer: false, onAir: new Array() };
 const SETTING_KEYS = Object.keys(DEFAULT_SETTINGS);
 // eslint-disable-next-line no-control-regex
 const ORDER_ITEM_RE = /^[^\u0000-\u001f<>]{1,64}$/;
@@ -261,11 +261,11 @@ function validateSettings(input) {
   const out = {};
   for (const [k, v] of Object.entries(input)) {
     if (!SETTING_KEYS.includes(k)) return { error: 'unknown key ' + k.slice(0, 40) };
-    if (k === 'order') {
-      if (!Array.isArray(v) || v.length > ORDER_MAX) return { error: 'order must be an array of at most ' + ORDER_MAX };
-      if (!v.every((x) => typeof x === 'string' && ORDER_ITEM_RE.test(x))) return { error: 'order items must be short strings' };
-      if (new Set(v).size !== v.length) return { error: 'order items must be unique' };
-      out.order = v;
+    if (k === 'order' || k === 'onAir') {
+      if (!Array.isArray(v) || v.length > ORDER_MAX) return { error: k + ' must be an array of at most ' + ORDER_MAX };
+      if (!v.every((x) => typeof x === 'string' && ORDER_ITEM_RE.test(x))) return { error: k + ' items must be short strings' };
+      if (new Set(v).size !== v.length) return { error: k + ' items must be unique' };
+      out[k] = v;
     } else if (k === 'speed') {
       if (!SPEEDS.includes(v)) return { error: 'speed must be one of ' + SPEEDS.join(', ') };
       out.speed = v;
@@ -298,9 +298,9 @@ const toUuid = (sid, desktop) => {
   return typeof uuid === 'string' ? uuid : '';
 };
 
-function readQueue(now, desktop) {
+function readQueue(now, desktop, source) {
   try {
-    const f = JSON.parse(readFileSync(QUEUE_FILE, 'utf8'));
+    const f = source === undefined ? JSON.parse(readFileSync(QUEUE_FILE, 'utf8')) : source;
     const at = Date.parse(f.at);
     if (!Number.isFinite(at) || at > now + 60000 || now - at >= FOCUS_MAX_MS || !Array.isArray(f.items)) return { uuids: [], slots: [], size: 0, orchestrator: '' };
     const items = f.items.slice(0, QUEUE_MAX);
@@ -346,6 +346,8 @@ function saveSettings(next) {
 
 const anonymizing = () => OPTS.anonymize || settings.anonymize;
 const showingTitles = () => OPTS.titles || settings.titles;
+const OFF_AIR_LABEL = 'OFF AIR';
+const onAirRooms = () => new Set(settings.onAir);
 
 function priorityRank(room) {
   const order = settings.order;
@@ -354,7 +356,9 @@ function priorityRank(room) {
   return i < 0 ? Infinity : i;
 }
 
-function scan(now = Date.now()) {
+let roomLabelsNow = new Array();
+
+function scanFull(now = Date.now(), queueSource) {
   const desktop = desktopSessions();
   const cliToLocal = new Map();
   for (const rec of desktop.values()) cliToLocal.set(rec.cli, rec);
@@ -401,9 +405,10 @@ function scan(now = Date.now()) {
 
   const rooms = new Map();
   const picked = [];
-  const queueFile = readQueue(now, desktop);
+  const queueFile = readQueue(now, desktop, queueSource);
   const queued = queueFile.uuids;
-  const queuedSet = new Set(queued);
+  const streaming = settings.streamer;
+  const air = onAirRooms();
   const first = [focusUuid, ...queued].map((u) => found.find((s) => s.uuid === u)).filter((s) => s !== undefined);
   const candidates = [...new Set([...first, ...found])];
   for (const s of candidates) {
@@ -422,7 +427,10 @@ function scan(now = Date.now()) {
     picked.push({ ...s, info, room });
   }
   picked.sort((a, b) => b.mtime - a.mtime);
-
+  const airUuids = new Set(picked.filter((s) => !streaming || air.has(s.room.id)).map((s) => s.uuid));
+  const slotOnAir = queueFile.slots.map((u) => !streaming || (u !== '' && airUuids.has(u)));
+  const queuedAir = queued.filter((u) => airUuids.has(u));
+  const waitingSet = new Set(queuedAir);
 
   const names = new Set();
   const byUuid = new Map();
@@ -434,13 +442,13 @@ function scan(now = Date.now()) {
     if (age < WORKING_MS) state = 'working';
     else if (kind === 'tool_use' && age < PENDING_WORKING_MS) state = 'working';
     else if (kind === 'prompt' && age < PENDING_WORKING_MS) state = 'working';
-    if (queuedSet.has(s.uuid)) state = 'waiting';
+    if (waitingSet.has(s.uuid)) state = 'waiting';
     let name = NAMES[num(s.uuid) % NAMES.length];
     for (let n = 2; names.has(name); n++) name = NAMES[num(s.uuid) % NAMES.length] + ' ' + n;
     names.add(name);
     const agent = { id: 'a' + sha(s.uuid).slice(0, 8), name, room: s.room.id, state };
     if (state === 'idle' && age > SLEEPY_MS) agent.sleepy = true;
-    if (showingTitles()) {
+    if (showingTitles() && !(streaming && !air.has(s.room.id))) {
       const rec = cliToLocal.get(s.uuid);
       if (rec && rec.title) agent.title = String(rec.title);
     }
@@ -474,15 +482,18 @@ function scan(now = Date.now()) {
     if (ra !== rb) return ra < rb ? -1 : 1;
     return roomLabel(a.root).localeCompare(roomLabel(b.root));
   });
-  const outRooms = ordered.map((r, i) => ({
-    id: r.id,
-    label: anonymizing() ? 'Room ' + String.fromCharCode(65 + (i % 26)) + (i >= 26 ? Math.floor(i / 26) : '') : roomLabel(r.root),
-  }));
+  const shownLabel = (r, i) => (anonymizing() ? 'Room ' + String.fromCharCode(65 + (i % 26)) + (i >= 26 ? Math.floor(i / 26) : '') : roomLabel(r.root));
+  const realLabels = ordered.map((r, i) => ({ id: r.id, label: shownLabel(r, i) }));
+  const outRooms = ordered.map((r, i) => (streaming && !air.has(r.id) ? { id: r.id, label: OFF_AIR_LABEL, offAir: true } : { id: r.id, label: shownLabel(r, i) }));
   const foundUuids = new Set(found.map((s) => s.uuid));
-  const queue = queued.filter((u) => foundUuids.has(u)).map((u) => byUuid.get(u)?.id || 'a' + sha(u).slice(0, 8));
-
-  return { generatedAt: now, rooms: outRooms, agents: agents.map((a) => a.agent), events, focus, queue, queueSize: queueFile.size, line: queueFile.slots.map((u) => { const a = u ? byUuid.get(u) : undefined; return a ? a.id : null; }) };
+  const queue = queuedAir.filter((u) => foundUuids.has(u)).map((u) => byUuid.get(u)?.id || 'a' + sha(u).slice(0, 8));
+  const line = queueFile.slots.filter((u, i) => slotOnAir[i]).map((u) => { const a = u ? byUuid.get(u) : undefined; return a ? a.id : null; });
+  const snap = { generatedAt: now, rooms: outRooms, agents: agents.map((a) => a.agent), events, focus, queue, queueSize: line.length, deferred: queueFile.size - line.length, line };
+  roomLabelsNow = realLabels;
+  return { snap, slotOnAir };
 }
+
+const scan = (now) => scanFull(now).snap;
 
 function counts(snap) {
   const c = { working: 0, waiting: 0, idle: 0 };
@@ -519,16 +530,24 @@ function contextTokens(path, size) {
 function nextInfo() {
   const now = Date.now();
   const desktop = desktopSessions();
+  let queueSource;
   let items = [];
   try {
-    const f = JSON.parse(readFileSync(QUEUE_FILE, 'utf8'));
-    const at = Date.parse(f.at);
-    if (Number.isFinite(at) && at <= now + 60000 && now - at < FOCUS_MAX_MS && Array.isArray(f.items)) items = f.items.slice(0, QUEUE_MAX);
+    queueSource = JSON.parse(readFileSync(QUEUE_FILE, 'utf8'));
+    const at = Date.parse(queueSource.at);
+    if (Number.isFinite(at) && at <= now + 60000 && now - at < FOCUS_MAX_MS && Array.isArray(queueSource.items)) items = queueSource.items.slice(0, QUEUE_MAX);
   } catch {}
-  const item = items[0];
-  if (!item) return 'QUEUE: empty';
+  if (!items.length) return 'QUEUE: empty';
+  let index = 0;
+  if (settings.streamer) {
+    const eligible = scanFull(now, queueSource).slotOnAir;
+    index = eligible.findIndex((ok) => ok);
+    if (index < 0) return 'QUEUE: nothing on air';
+  }
+  const item = items[index];
+  const prefix = ['QUEUE_INDEX: ' + index, ...(settings.streamer ? ['DEFERRED: ' + index] : [])].join('\n') + '\n';
   const sid = typeof item === 'string' ? item : item && typeof item.sessionId === 'string' ? item.sessionId : '';
-  if (!sid) return 'SESSION_ID: "none"\nTITLE: "none"\nPROJECT: "none"\nCONTEXT_TOKENS: 0';
+  if (!sid) return prefix + 'SESSION_ID: "none"\nTITLE: "none"\nPROJECT: "none"\nCONTEXT_TOKENS: 0';
   const rec = sid.startsWith('local_') ? desktop.get(sid) : [...desktop.values()].find((r) => r.cli === sid);
   const uuid = toUuid(sid, desktop);
   let file = '';
@@ -550,7 +569,7 @@ function nextInfo() {
       tokens = contextTokens(file, st.size);
     }
   }
-  return [
+  return prefix + [
     'SESSION_ID: ' + JSON.stringify(sid),
     'TITLE: ' + JSON.stringify(rec && rec.title ? String(rec.title) : 'unknown'),
     'TITLE_AVAILABLE: ' + Boolean(rec && rec.title),
@@ -670,6 +689,9 @@ const server = createServer((req, res) => {
   } else if (path === '/state.json') {
     res.writeHead(200, { ...headers, 'content-type': 'application/json; charset=utf-8' });
     res.end(JSON.stringify(snapshot));
+  } else if (path === '/rooms.json') {
+    res.writeHead(200, { ...headers, 'content-type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify(roomLabelsNow));
   } else if (path === '/settings') {
     res.writeHead(200, { ...headers, 'content-type': 'application/json; charset=utf-8' });
     res.end(JSON.stringify(settings));

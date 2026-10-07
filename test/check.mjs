@@ -620,6 +620,7 @@ const basePort = Number(process.env.SO_TEST_PORT) || 0;
 const SPORT = await freePort(basePort);
 const LPORT = await freePort(basePort ? basePort + 1 : 0);
 const CPORT = await freePort(basePort ? basePort + 2 : 0);
+const TPORT = await freePort(basePort ? basePort + 3 : 0);
 
 const serverJob = async () => {
   fixtureHome = mkdtempSync(join(tmpdir(), 'so-home-'));
@@ -732,6 +733,67 @@ const serverJob = async () => {
   say('server ok');
   server.kill();
 
+};
+
+const streamerJob = async () => {
+  const home = mkdtempSync(join(tmpdir(), 'so-stream-'));
+  const fx = makeFixture(home);
+  const ids = Object.fromEntries(fx.map((f) => [f.project + f.ageSec, f.id]));
+  const queueFile = join(home, '.session-orchestrator', 'queue.json');
+  const queueBefore = readFileSync(queueFile, 'utf8');
+  await startServer(home, TPORT);
+  await serverReady(TPORT);
+  const ok = { origin: `http://127.0.0.1:${TPORT}`, 'content-type': 'application/json' };
+  const post = (obj) => httpReq(TPORT, { method: 'POST', path: '/settings', headers: ok, body: JSON.stringify(obj) });
+  const nextInfo = () => execFileSync('node', [join(ROOT, 'scan.mjs'), '--next-info'], { env: { ...process.env, HOME: home }, encoding: 'utf8' });
+  const base = await stateOf(TPORT);
+  check(base.deferred === 0 && base.rooms.every((r) => !r.offAir), 'streamer off: deferred is not 0 or a room is off air');
+  const roomId = (label) => base.rooms.find((r) => r.label === label).id;
+  const full = JSON.stringify(base.line);
+  check(/^QUEUE_INDEX: 0$/m.test(nextInfo()) && !/DEFERRED/.test(nextInfo()), `streamer off --next-info ${nextInfo()}`);
+  check((await post({ streamer: 'yes' })).status === 400, 'streamer must be a boolean');
+  for (const [name, body] of [['not an array', { onAir: 'a' }], ['duplicate', { onAir: ['a', 'a'] }], ['item type', { onAir: [1] }], ['too long', { onAir: Array.from({ length: 65 }, (_, i) => 'r' + i) }], ['control char', { onAir: ['a\u0001b'] }], ['angle bracket', { onAir: ['<b>'] }]]) {
+    const x = await post(body);
+    check(x.status === 400, `bad onAir "${name}" got ${x.status}`);
+  }
+  check((await post({ streamer: true, onAir: [roomId('beacon')] })).status === 200, 'streamer post rejected');
+  let s = await stateOf(TPORT);
+  const raw = JSON.stringify(s);
+  for (const label of ['atlas', 'citadel', 'delta']) check(!raw.includes(label), `streamer state.json leaks ${label}`);
+  check(!raw.includes('/work') && !raw.includes(home) && !raw.includes('Tidy the parser'), 'streamer state.json leaks paths or titles');
+  const off = s.rooms.filter((r) => r.offAir);
+  check(off.length === 3 && off.every((r) => r.label === 'OFF AIR'), `off-air rooms ${JSON.stringify(s.rooms)}`);
+  check(s.rooms.filter((r) => !r.offAir).map((r) => r.label).join() === 'beacon', 'the on-air room lost its label');
+  const air = [ids.beacon380, ids.beacon200];
+  check(JSON.stringify(s.line) === JSON.stringify(air) && JSON.stringify(s.queue) === JSON.stringify(air), `streamer line/queue ${JSON.stringify(s.line)} ${JSON.stringify(s.queue)}`);
+  check(s.queueSize === 2 && s.deferred === 4, `streamer queueSize ${s.queueSize} deferred ${s.deferred}`);
+  check(s.agents.filter((a) => a.state === 'waiting').map((a) => a.id).sort().join() === [...air].sort().join(), 'deferred agents still waiting');
+  check(readFileSync(queueFile, 'utf8') === queueBefore, 'streamer mode wrote queue.json');
+  let info = nextInfo();
+  check(/^QUEUE_INDEX: 3$/m.test(info) && /^DEFERRED: 3$/m.test(info) && /^PROJECT: "beacon"$/m.test(info) && /^SESSION_ID: "/m.test(info) && /^TITLE_AVAILABLE: false$/m.test(info) && /^CONTEXT_TOKENS: /m.test(info) && /^CHECKED_AT: /m.test(info), `streamer --next-info ${info}`);
+  const real = JSON.parse((await httpReq(TPORT, { path: '/rooms.json' })).text);
+  check(real.map((r) => r.label).sort().join() === 'atlas,beacon,citadel,delta', `rooms.json ${JSON.stringify(real)}`);
+  await post({ titles: true, onAir: [roomId('atlas')] });
+  s = await stateOf(TPORT);
+  check(s.agents.some((a) => a.title === 'Tidy the parser') && !JSON.stringify(s).includes('beacon'), 'on-air titles missing or off-air label leaked');
+  info = nextInfo();
+  check(/^QUEUE_INDEX: 0$/m.test(info) && /^DEFERRED: 0$/m.test(info) && /^TITLE: "Tidy the parser"$/m.test(info), `streamer --next-info atlas ${info}`);
+  await post({ titles: false, onAir: [roomId('delta')] });
+  s = await stateOf(TPORT);
+  check(s.line.length === 1 && s.line[0] === ids.delta400 && /^QUEUE_INDEX: 2$/m.test(nextInfo()) && /^DEFERRED: 2$/m.test(nextInfo()), `delta only ${JSON.stringify(s.line)} ${nextInfo()}`);
+  await post({ onAir: [] });
+  s = await stateOf(TPORT);
+  check(s.line.length === 0 && s.queue.length === 0 && s.queueSize === 0 && s.deferred === 6, `nothing on air state ${JSON.stringify([s.line, s.queue, s.queueSize, s.deferred])}`);
+  check(s.agents.every((a) => a.state !== 'waiting') && s.rooms.every((r) => r.offAir), 'nothing on air: agents waiting or rooms visible');
+  check(nextInfo().trim() === 'QUEUE: nothing on air', `nothing on air --next-info ${nextInfo()}`);
+  const onDisk = JSON.parse(readFileSync(join(home, '.session-orchestrator', 'settings.json'), 'utf8'));
+  check(onDisk.streamer === true && Array.isArray(onDisk.onAir) && onDisk.onAir.length === 0, 'streamer settings not persisted');
+  await post({ streamer: false });
+  s = await stateOf(TPORT);
+  check(JSON.stringify(s.line) === full && s.deferred === 0 && s.queueSize === 6, 'streamer off did not restore the full line');
+  check(s.rooms.map((r) => r.label).join() === 'atlas,beacon,citadel,delta' && s.rooms.every((r) => !r.offAir), 'streamer off did not restore labels');
+  check(/^QUEUE_INDEX: 0$/m.test(nextInfo()) && readFileSync(queueFile, 'utf8') === queueBefore, 'streamer off --next-info or queue.json changed');
+  say('streamer ok');
 };
 
 const crowdJob = async () => {
@@ -958,6 +1020,69 @@ async function runDemo(vw, vh, dpr, tag) {
   await ctx.close();
 }
 
+const floorSpread = (page, id) => page.evaluate((fid) => {
+  const f = window.__office.floors().find((x) => x.id === fid);
+  const w = window.__office.world();
+  const c = document.getElementById('cv');
+  const copy = document.createElement('canvas');
+  copy.width = c.width; copy.height = c.height;
+  const g = copy.getContext('2d', { willReadFrequently: true });
+  g.drawImage(c, 0, 0);
+  let spread = 0;
+  for (let x = 60; x < w.w - 60; x += 3) {
+    for (const y of [f.y + 6, f.y + Math.round((f.foot - f.top) / 2), f.foot - 3]) {
+      const d = g.getImageData(x, y, 1, 1).data;
+      spread = Math.max(spread, Math.max(d[0], d[1], d[2]) - Math.min(d[0], d[1], d[2]));
+    }
+  }
+  return spread;
+}, id);
+
+async function streamerUi(page, tag) {
+  const names = ['dashboard', 'gateway', 'infra', 'docs'];
+  const labels = () => ev(page, () => window.__office.rooms().map((r) => r.label));
+  await page.locator('[data-id="tg:streamer"]').click();
+  await nap(page, 400);
+  check((await page.locator('[data-id="tg:streamer"]').getAttribute('aria-checked')) === 'true', `${tag} streamer toggle not on`);
+  check((await labels()).every((l) => l === 'OFF AIR'), `${tag} streamer on did not put every floor off air: ${await labels()}`);
+  const ticks = page.locator('[data-kind="tick"]');
+  const tickCount = await ticks.count();
+  check(tickCount === (await uiState(page)).geo.rows && tickCount >= 3, `${tag} floor rows missing ticks (${tickCount})`);
+  const first = await ticks.first().getAttribute('aria-label');
+  check(/, off stream$/.test(first || '') && names.some((n) => (first || '').startsWith(n)), `${tag} tick label ${first}`);
+  await boxChecks(page, tag, 'settings streamer');
+  const before = await ev(page, () => window.__office.rooms().map((r) => r.id));
+  const firstId = before[0];
+  await ticks.first().click();
+  await nap(page, 400);
+  const afterTick = await ev(page, () => window.__office.rooms());
+  check(afterTick.map((r) => r.id).join() === before.join(), `${tag} a tick click moved a floor`);
+  check(afterTick.filter((r) => !r.offAir).map((r) => r.id).join() === firstId && afterTick[0].label !== 'OFF AIR' && afterTick.slice(1).every((r) => r.label === 'OFF AIR'), `${tag} ticking one floor did not put only it on air: ${JSON.stringify(afterTick)}`);
+  check((await ticks.first().getAttribute('aria-checked')) === 'true' && /, on stream$/.test((await ticks.first().getAttribute('aria-label')) || ''), `${tag} tick not checked after click`);
+  check((await ev(page, () => window.__office.settings().onAir)).join() === firstId, `${tag} onAir not stored`);
+  const fl = await ev(page, () => window.__office.floors().map((f) => f.id));
+  const onSpread = await floorSpread(page, firstId);
+  const offSpread = await floorSpread(page, fl.find((id) => id[0] !== '_' && id !== firstId) || '');
+  check(onSpread > 40 && offSpread < 14, `${tag} off-air floors not greyed (on ${onSpread}, off ${offSpread})`);
+  await page.screenshot({ path: join(SHOTS, `${tag}-streamer-on.png`) });
+  await page.locator('[data-kind="row"]').nth(1).focus();
+  await page.keyboard.press('Space');
+  await nap(page, 400);
+  const afterSpace = await ev(page, () => window.__office.rooms());
+  check(afterSpace.filter((r) => !r.offAir).length === 2 && !afterSpace[1].offAir, `${tag} Space on a row did not toggle its floor: ${JSON.stringify(afterSpace)}`);
+  check(await ev(page, () => document.activeElement instanceof HTMLElement && document.activeElement.dataset.id === 'row:' + window.__office.rooms()[1].id), `${tag} focus lost after Space`);
+  await page.keyboard.press('Space');
+  await nap(page, 400);
+  check((await ev(page, () => window.__office.rooms().filter((r) => !r.offAir).length)) === 1, `${tag} Space did not toggle off again`);
+  await page.locator('[data-id="tg:streamer"]').click();
+  await nap(page, 400);
+  const restored = await labels();
+  check(restored.every((l) => l !== 'OFF AIR') && restored.slice().sort().join() === names.slice().sort().join(), `${tag} streamer off did not restore labels: ${restored}`);
+  check((await page.locator('[data-kind="tick"]').count()) === 0, `${tag} ticks still shown with streamer off`);
+  check((await ev(page, () => window.__office.rooms().every((r) => !r.offAir))), `${tag} offAir flags remain after streamer off`);
+  check((await ev(page, () => window.__office.settings().onAir)).join() === firstId, `${tag} onAir lost when streamer turned off`);
+}
+
 async function runUi(vw, vh, dpr, tag) {
   {
     const { ctx, page, errors } = await open(vw, vh, dpr, `file://${ROOT}/index.html?demo=1&seed=3&speed=3&sim=0`, 1200);
@@ -1020,6 +1145,7 @@ async function runUi(vw, vh, dpr, tag) {
     await nap(page, 300);
     check((await ev(page, () => window.__office.agents().filter((a) => a.title).length)) === 10, `${tag} demo titles not shown`);
     await page.locator('[data-id="tg:titles"]').click();
+    await streamerUi(page, tag);
     await page.locator('[data-id="sp:2"]').click();
     await page.locator('[data-id="tg:sound"]').click();
     const st = await ev(page, () => window.__office.settings());
@@ -1508,6 +1634,7 @@ const add = (name, groups, fn, quick = false) => {
 };
 add('server', ['server'], serverJob, true);
 add('crowd', ['server'], crowdJob, true);
+add('streamer', ['server'], streamerJob, true);
 add('live', ['live'], liveJob, true);
 add('leave l1280', ['leave', 'ui'], () => leaveCheck(1280, 720, 'l1280'), true);
 add('leave l390', ['leave', 'ui'], () => leaveCheck(390, 844, 'l390'));

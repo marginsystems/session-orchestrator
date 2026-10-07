@@ -301,6 +301,21 @@ const drawCab = function (t) {
   }
 };
 
+const drawOffAir = function () {
+  const off = S.rooms.filter((r) => r.offAir && S.floors.includes(r.id));
+  if (!off.length) return;
+  ctx.save();
+  for (const r of off) {
+    const y = floorTop(fIdx(r.id));
+    ctx.globalCompositeOperation = 'saturation';
+    ctx.fillStyle = '#808080'; ctx.fillRect(BM, y, S.LW - 2 * BM, S.Hf);
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = 0.5; ctx.fillStyle = '#1a1c2c'; ctx.fillRect(BM, y, S.LW - 2 * BM, S.Hf);
+    ctx.globalAlpha = 1;
+  }
+  ctx.restore();
+};
+
 const draw = function (t) {
   ctx.clearRect(0, 0, S.LW, cv.height);
   if (S.anim && S.bgCv && S.fc) {
@@ -325,6 +340,7 @@ const draw = function (t) {
   drawCab(t);
   for (const a of all) if (a.away && !a.inCab) drawAgent(a, t);
   if (B.away && !B.inCab) drawAgent(B, t);
+  drawOffAir();
   if (S.dim > 0.01) { ctx.globalAlpha = 0.28 * S.dim; ctx.fillStyle = '#1a1c2c'; ctx.fillRect(BM, T0(), S.LW - 2 * BM, S.floors.length * S.Hf); ctx.globalAlpha = 1; }
   for (const a of all) {
     const x = Math.round(a.x);

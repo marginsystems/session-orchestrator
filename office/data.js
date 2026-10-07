@@ -5,11 +5,22 @@ let SERVER = false;
 const localView = function (raw) {
   const order = S.set.order;
   const rank = (room) => { let i = order.indexOf(room.id); if (i < 0) i = order.findIndex((x) => x.toLowerCase() === room.label.toLowerCase()); return i < 0 ? 1e9 : i; };
-  const rooms = raw.rooms.map((r, i) => ({ r, i })).sort((a, b) => rank(a.r) - rank(b.r) || a.i - b.i).map((x) => ({ id: x.r.id, label: x.r.label }));
+  const rooms = raw.rooms.map((r, i) => ({ r, i })).sort((a, b) => rank(a.r) - rank(b.r) || a.i - b.i).map((x) => ({ id: x.r.id, label: x.r.label, offAir: false }));
   if (S.set.anonymize) rooms.forEach((r, i) => { r.label = 'Room ' + String.fromCharCode(65 + (i % 26)) + (i >= 26 ? Math.floor(i / 26) : ''); });
+  S.real = new Map(rooms.map((r) => [r.id, r.label]));
+  const air = new Set(S.set.onAir);
+  const offAir = new Set(S.set.streamer ? rooms.filter((r) => !air.has(r.id)).map((r) => r.id) : []);
+  for (const r of rooms) if (offAir.has(r.id)) { r.label = 'OFF AIR'; r.offAir = true; }
   const rIdx = new Map(rooms.map((r, i) => [r.id, i]));
-  const agents = raw.agents.map((a) => { const o = { ...a }; if (!S.set.titles) delete o.title; return o; });
-  const queue = raw.queue || agents.filter((a) => a.state === 'waiting').sort((a, b) => rIdx.get(a.room) - rIdx.get(b.room) || (a.since || 0) - (b.since || 0)).map((a) => a.id);
+  const agents = raw.agents.map((a) => {
+    const o = { ...a };
+    const hidden = offAir.has(a.room);
+    if (!S.set.titles || hidden) delete o.title;
+    if (hidden && o.state === 'waiting') { o.state = 'idle'; o.since = 0; }
+    return o;
+  });
+  const onScreen = new Set(agents.filter((a) => !offAir.has(a.room)).map((a) => a.id));
+  const queue = raw.queue ? raw.queue.filter((id) => onScreen.has(id)) : agents.filter((a) => a.state === 'waiting').sort((a, b) => rIdx.get(a.room) - rIdx.get(b.room) || (a.since || 0) - (b.since || 0)).map((a) => a.id);
   return { ...raw, rooms, agents, queue };
 };
 
@@ -44,8 +55,8 @@ const applyState = function (raw) {
     else if (S.ready && !first && a.slot >= 0 && !a.joining) { a.gone = true; a.leaving = true; leavers.push(a); }
     else S.agents.delete(id);
   }
-  S.rooms = s.rooms.map((r) => ({ id: r.id, label: r.label }));
-  for (const r of oldRooms) if (!S.rooms.some((x) => x.id === r.id) && [...S.agents.values()].some((a) => a.leaving && a.room === r.id)) S.rooms.splice(Math.min(oldRooms.indexOf(r), S.rooms.length), 0, { id: r.id, label: r.label });
+  S.rooms = s.rooms.map((r) => ({ id: r.id, label: r.label, offAir: !!r.offAir }));
+  for (const r of oldRooms) if (!S.rooms.some((x) => x.id === r.id) && [...S.agents.values()].some((a) => a.leaving && a.room === r.id)) S.rooms.splice(Math.min(oldRooms.indexOf(r), S.rooms.length), 0, { id: r.id, label: r.label, offAir: r.offAir });
   const roomIds = new Set(S.rooms.map((r) => r.id));
   const slots = new Map();
   for (const r of S.rooms) {
@@ -120,6 +131,16 @@ const handleEvents = function (s) {
   firstLoad = false;
 };
 
+const fetchRealLabels = async function () {
+  if (!SERVER || !S.set.streamer) { if (SERVER) S.real = new Map(); return; }
+  try {
+    const r = await fetch('rooms.json', { cache: 'no-store' });
+    const list = await r.json();
+    S.real = new Map(list.map((x) => [x.id, x.label]));
+    UI.dirty = true;
+  } catch {}
+};
+
 const hudMessage = function (m) { S.msg = m; statEl.textContent = m; if (S.ready) drawStatic(); };
 
 const poll = async function () {
@@ -129,6 +150,7 @@ const poll = async function () {
     const s = await r.json();
     if (S.posting) return;
     applyState(s); handleEvents(s);
+    if (UI.settings) fetchRealLabels();
   } catch {
     hudMessage('offline - run node scan.mjs');
   }
@@ -139,7 +161,8 @@ const cleanSet = (o) => {
   const r = { ...DEF_SET };
   if (!o || typeof o !== 'object') return r;
   if (Array.isArray(o.order)) r.order = [...new Set(o.order.filter((x) => typeof x === 'string' && x.length <= 64))].slice(0, 64);
-  for (const k of ['anonymize', 'titles', 'sound']) if (typeof o[k] === 'boolean') r[k] = o[k];
+  if (Array.isArray(o.onAir)) r.onAir = [...new Set(o.onAir.filter((x) => typeof x === 'string' && x.length <= 64))].slice(0, 64);
+  for (const k of ['anonymize', 'titles', 'sound', 'streamer']) if (typeof o[k] === 'boolean') r[k] = o[k];
   if ([1, 2, 3].includes(o.speed)) r.speed = o.speed;
   if (typeof o.onboardedAt === 'string') r.onboardedAt = o.onboardedAt;
   return r;
@@ -157,6 +180,7 @@ const saveSet = function (patch) {
     .then(() => fetch('settings', { method: 'POST', headers: { 'content-type': 'application/json' }, body }))
     .then(async (r) => { if (r.ok) S.set = cleanSet(await r.json()); })
     .catch(() => {})
+    .then(() => fetchRealLabels())
     .then(() => { S.posting--; if (!S.posting) poll(); });
   return postChain;
 };

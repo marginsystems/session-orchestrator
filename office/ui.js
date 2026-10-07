@@ -13,6 +13,7 @@ const U = { u: 2, W: 0, H: 0 };
 const newDrag = (id, pid, y, order) => ({ id, pid, y0: y, y, order, moved: false });
 const UI = { settings: false, tour: TYPE_ONLY ? newTour() : null, drag: TYPE_ONLY ? newDrag('', 0, 0, ['']) : null, scroll: 0, items: TYPE_ONLY ? [{ id: '', kind: '', x: 0, y: 0, w: 0, h: 0 }] : [], geo: TYPE_ONLY ? { x: 0, y: 0, w: 0, h: 0, ix: 0, iw: 0, listY: 0, rows: 0, n: 0, rooms: [{ id: '', label: '' }], optY: 0, speedY: 0, soundY: 0, resetY: 0 } : null, dialog: TYPE_ONLY ? { x: 0, y: 0, w: 0, h: 0, lines: [''] } : null, strip: TYPE_ONLY ? { x: 0, y: 0, w: 0, h: 0 } : null, dirty: true, focusId: '', refocus: TYPE_ONLY ? '' : null };
 const RH = 13;
+const TICK_W = 14;
 
 const CONF = ['#ef7d57', '#ffcd75', '#a7f070', '#73eff7', '#b86fd1', '#f4f4f4', '#41a6f6', '#b13e53'];
 
@@ -43,7 +44,8 @@ const wrapText = function (t, cols) {
   return lines;
 };
 
-const roomList = () => S.rooms.map((r) => ({ id: r.id, label: r.label }));
+const roomList = () => S.rooms.map((r) => ({ id: r.id, label: S.real.get(r.id) ?? r.label }));
+const isOnAir = (id) => S.set.onAir.includes(id);
 const listIds = () => S.rooms.map((r) => r.id);
 
 const uiLayout = function () {
@@ -63,7 +65,7 @@ const uiLayout = function () {
   }
   if (UI.settings) {
     const rooms = roomList(), n = rooms.length;
-    const pw = Math.min(W - 8, 252), fixed = 15 + 22 + 5 + 9 + 4 + 4 * 13 + 4 + 15 + 7;
+    const pw = Math.min(W - 8, 252), fixed = 15 + 22 + 5 + 9 + 4 + (S.set.streamer ? 5 : 4) * 13 + 4 + 15 + 7;
     const room = floorY - 8 - fixed;
     const maxRows = clamp(Math.floor(room / RH), 3, Math.max(3, n));
     const rows = Math.max(1, Math.min(n, maxRows));
@@ -80,13 +82,15 @@ const uiLayout = function () {
       const r = rooms[UI.scroll + i];
       if (!r) break;
       const ry = g.listY + i * RH;
-      items.push({ id: 'row:' + r.id, kind: 'row', rid: r.id, label: r.label + ', floor priority ' + (UI.scroll + i + 1) + ' of ' + n + '. Arrow keys move it.', x: ix, y: ry, w: iw - 24, h: RH - 1 });
+      const air = S.set.streamer ? (isOnAir(r.id) ? ', on stream' : ', off stream') : '';
+      items.push({ id: 'row:' + r.id, kind: 'row', rid: r.id, label: r.label + air + ', floor priority ' + (UI.scroll + i + 1) + ' of ' + n + '. Arrow keys move it.' + (air ? ' Space toggles the stream.' : ''), x: ix, y: ry, w: iw - 24 - (S.set.streamer ? TICK_W : 0), h: RH - 1 });
+      if (S.set.streamer) items.push({ id: 'tick:' + r.id, kind: 'tick', rid: r.id, label: r.label + (isOnAir(r.id) ? ', on stream' : ', off stream'), x: ix + iw - 24 - TICK_W + 2, y: ry + 1, w: TICK_W - 3, h: RH - 3 });
       items.push({ id: 'up:' + r.id, kind: 'up', rid: r.id, label: 'Move ' + r.label + ' up', x: ix + iw - 22, y: ry + 1, w: 10, h: RH - 3 });
       items.push({ id: 'down:' + r.id, kind: 'down', rid: r.id, label: 'Move ' + r.label + ' down', x: ix + iw - 11, y: ry + 1, w: 10, h: RH - 3 });
     }
     let y = g.listY + rows * RH + 5 + 9;
     g.optY = y - 9;
-    for (const [key, label] of [['anonymize', 'Anonymize room names'], ['titles', 'Show session titles']]) {
+    for (const [key, label] of [['anonymize', 'Anonymize room names'], ['titles', 'Show session titles'], ['streamer', 'Streamer mode']]) {
       items.push({ id: 'tg:' + key, kind: 'toggle', key, label, x: ix, y, w: iw, h: 12 });
       y += 13;
     }
@@ -126,6 +130,7 @@ const syncHit = function () {
     b.style.left = (it.x - pad) * k + 'px'; b.style.top = (it.y - pad) * k + 'px'; b.style.width = (it.w + 2 * pad) * k + 'px'; b.style.height = (it.h + 2 * pad) * k + 'px';
     if (it.tab === -1) { b.tabIndex = -1; b.setAttribute('aria-hidden', 'true'); } else b.setAttribute('aria-label', it.label);
     if (it.kind === 'toggle') { b.setAttribute('role', 'switch'); b.setAttribute('aria-checked', String(!!S.set[it.key])); }
+    if (it.kind === 'tick') { b.setAttribute('role', 'checkbox'); b.setAttribute('aria-checked', String(isOnAir(it.rid ?? ''))); }
     if (it.kind === 'speed') b.setAttribute('aria-pressed', String(S.set.speed === it.v));
     if (it.kind === 'row') wireRow(b, it);
     else b.addEventListener('click', () => act(it));
@@ -176,6 +181,7 @@ const wireRow = function (b, it) {
   b.addEventListener('pointerup', end);
   b.addEventListener('pointercancel', end);
   b.addEventListener('keydown', (e) => {
+    if (e.key === ' ' && S.set.streamer) { e.preventDefault(); toggleAir(it.rid ?? '', 'row:'); return; }
     if (e.key === 'ArrowUp' || e.key === 'ArrowDown') { e.preventDefault(); moveRoom(it.rid, e.key === 'ArrowUp' ? -1 : 1, 'row:'); }
   });
 };
@@ -209,13 +215,23 @@ const moveRoom = function (id, d, focusKind) {
   }
 };
 
+const toggleAir = function (id, focusKind) {
+  const cur = S.set.onAir;
+  UI.refocus = focusKind + id;
+  saveSet({ onAir: cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id].slice(-64) });
+  if (!SERVER && S.last) applyState(S.last);
+  UI.dirty = true;
+};
+
 const act = function (it) {
   if (it.kind === 'scrim' || it.kind === 'close') closeSettings();
   else if (it.kind === 'up') moveRoom(it.rid, -1);
   else if (it.kind === 'down') moveRoom(it.rid, 1);
+  else if (it.kind === 'tick') toggleAir(it.rid ?? '', 'tick:');
   else if (it.kind === 'toggle') {
     saveSet({ [it.key]: !S.set[it.key] });
     if (!SERVER && S.last && it.key !== 'sound') applyState(S.last);
+    if (it.key === 'streamer') UI.refocus = it.id;
     UI.dirty = true;
   } else if (it.kind === 'speed') { saveSet({ speed: it.v }); UI.dirty = true; }
   else if (it.kind === 'reset') resetOnboarding();
@@ -224,6 +240,7 @@ const act = function (it) {
 };
 
 const openSettings = function () {
+  fetchRealLabels();
   UI.settings = true; UI.scroll = 0; UI.dirty = true;
   UI.refocus = S.rooms.length ? 'row:' + S.rooms[0].id : 'close';
   gearEl.setAttribute('aria-expanded', 'true');
@@ -295,7 +312,7 @@ const drawPanel = function () {
     uR(g.ix, ry, 2, RH - 1, wc);
     for (let a = 0; a < 3; a++) { uR(g.ix + 5, ry + 3 + a * 3, 2, 1, '#94b0c2'); uR(g.ix + 8, ry + 3 + a * 3, 2, 1, '#94b0c2'); }
     uT(String(i + 1), g.ix + 13, ry + 3, '#ffcd75');
-    const maxc = Math.max(3, Math.floor((rowW - 26 - 26) / 6));
+    const maxc = Math.max(3, Math.floor((rowW - 26 - 26 - (S.set.streamer ? TICK_W : 0)) / 6));
     const nm = fitLine(fold(label.get(id) || ''), maxc * 6 - 1);
     uT(nm.t, g.ix + 13 + (order.length > 9 ? 17 : 11), ry + 3 + (nm.sm ? 1 : 0), '#f4f4f4', nm.sm);
     if (it) ring(it);
@@ -307,6 +324,13 @@ const drawPanel = function () {
     if (D && D.moved && D.id === id) { uR(g.ix, ry, g.iw, RH - 1, '#0f1020'); continue; }
     drawRow(id, ry, false);
     const upI = UI.items.find((x) => x.id === 'up:' + id), dnI = UI.items.find((x) => x.id === 'down:' + id);
+    const tk = UI.items.find((x) => x.id === 'tick:' + id);
+    if (tk) {
+      const on = isOnAir(id);
+      uR(tk.x, tk.y, tk.w, tk.h, on ? '#94b0c2' : '#566c86'); uR(tk.x + 1, tk.y + 1, tk.w - 2, tk.h - 2, on ? '#38b764' : '#1a1c2c');
+      if (on) icon(uctx, 'ck', tk.x + 3, tk.y + 2, '#f4f4f4');
+      ring(tk);
+    }
     for (const { bi, nm, dis } of [{ bi: upI, nm: 'up', dis: idx === 0 }, { bi: dnI, nm: 'down', dis: idx === order.length - 1 }]) {
       if (!bi) continue;
       uR(bi.x, bi.y, bi.w, bi.h, '0'); uR(bi.x + 1, bi.y + 1, bi.w - 2, bi.h - 2, dis ? '#1a1c2c' : '#566c86');
@@ -328,7 +352,7 @@ const drawPanel = function () {
     if (it.kind === 'toggle') {
       uR(it.x, it.y + 1, 9, 9, '#94b0c2'); uR(it.x + 1, it.y + 2, 7, 7, S.set[it.key] ? '#38b764' : '#1a1c2c');
       if (S.set[it.key]) icon(uctx, 'ck', it.x + 2, it.y + 3, '#f4f4f4');
-      const name = it.key === 'anonymize' ? 'ANONYMIZE ROOMS' : it.key === 'titles' ? 'SHOW SESSION TITLES' : 'SOUND';
+      const name = it.key === 'anonymize' ? 'ANONYMIZE ROOMS' : it.key === 'titles' ? 'SHOW SESSION TITLES' : it.key === 'streamer' ? 'STREAMER MODE' : 'SOUND';
       uT(name, it.x + 13, it.y + 2, '#f4f4f4');
       if (it.key === 'sound') uT(S.set.sound ? 'ON' : 'OFF', it.x + it.w - 4 - textW(S.set.sound ? 'ON' : 'OFF') - 0, it.y + 2, '#566c86');
       ring(it);

@@ -74,11 +74,23 @@ Click the gear in the header. The panel is a small retro window over the office.
 - **Floor priority**: the list of projects. Drag a row, or use the up and down buttons (or the arrow keys on a focused row). Floor order is priority: the highest priority sits right under the Boss Office, the lowest just above the Lobby. The building re-stacks with the floors sliding into place. Projects you have not ordered go below the ordered ones, alphabetically, the same order as the Claude Code sidebar when it groups sessions by project. Floors are named like the sidebar too: the GitHub repository name, or the folder name when there is no remote.
 - **Anonymize rooms**: hides project names (Room A, B, C).
 - **Show session titles**: shows a small name tag above each critter.
+- **Streamer mode**: hides every project that is not ticked as on stream; see below. With it on, each row in the floor list gets a tick box (or press Space on a focused row).
 - **Demo speed**: 1x, 2x or 3x, for the demo.
 - **Sound**: stored for later, nothing plays yet.
 - **Reset onboarding**: replays the tour.
 
-Settings are saved to `~/.session-orchestrator/settings.json` through the loopback server (`GET /settings`, `POST /settings`). `POST` takes a JSON object with only the known keys (`order`, `anonymize`, `titles`, `speed`, `sound`, `onboardedAt`), is limited to 4 KB, requires `Content-Type: application/json`, and is accepted only from the same origin. Without a server (demo, or a copy of the page opened from disk) settings fall back to `localStorage`.
+Settings are saved to `~/.session-orchestrator/settings.json` through the loopback server (`GET /settings`, `POST /settings`). `POST` takes a JSON object with only the known keys (`order`, `anonymize`, `titles`, `speed`, `sound`, `onboardedAt`, `streamer`, `onAir`), is limited to 4 KB, requires `Content-Type: application/json`, and is accepted only from the same origin. Without a server (demo, or a copy of the page opened from disk) settings fall back to `localStorage`.
+
+## Streamer mode
+
+Turn it on in the settings panel, then tick the floors that may be on stream. Every floor you leave unticked is off air:
+
+- Its sign reads OFF AIR and the floor is drawn greyed out. The real project name is not in `state.json` at all (not in `rooms`, not in titles, not in events), so nothing on the page or in the API leaks it.
+- Its agents keep generic names and never show a session title.
+- Queue items whose session is not an on-air agent (an off-air floor, not on screen, or no session) are deferred. They are left out of `line`, `queue` and `queueSize`, their agents sit idle at their desks instead of waiting, and `state.json` carries `deferred: <count>`. Nothing is written to `queue.json`: the queue is deferred, not changed, and turning streamer mode off returns the full line in the original order.
+- `node scan.mjs --next-info` picks the first item that is not deferred and prints its `QUEUE_INDEX` in `queue.json`. When nothing is eligible it prints `QUEUE: nothing on air`. `/next` and `/orchestrate` follow that and never mention deferred items.
+
+The settings panel itself lists every project name (it reads them from a separate local endpoint, not `state.json`), so set streamer mode up before you go live and keep the panel closed on stream. Anonymize still applies to on-air floors.
 
 ## Onboarding
 
@@ -120,11 +132,13 @@ Every item stands in the waiting room in that order, front first, so a long queu
          | {id, kind: "join", at, agentId}],
   focus:  {agentId, at} | null,
   queue:  [agentId, ...],
-  queueSize: number
+  queueSize: number,
+  deferred: number
 }
 ```
 
-- `rooms` are already in priority order.
+- `rooms` are already in priority order. A room carries `offAir: true` (and the label `OFF AIR`) while streamer mode is on and the floor is not ticked.
+- `deferred` is the number of queue items held back by streamer mode (0 otherwise).
 - A `boss_visit` is emitted for a genuine human prompt in a transcript. Tool results, cross-session messages, task notifications, system reminders, scheduled-task wrappers and other injected turns do not count (`lib/prompts.mjs`).
 - A `join` is emitted when a session whose transcript was created recently appears after the server started. Sessions that existed at startup are not announced.
 
