@@ -7,6 +7,8 @@ allowed-tools: Bash(node *), Read, Write, Edit
 
 If this session is not the orchestrator, say so in one line and point to `/orchestrate`. Otherwise:
 
+!`node "${CLAUDE_PLUGIN_ROOT}/scan.mjs" --ensure`
+
 The next item to show, read from the local session data just now:
 
 !`node "${CLAUDE_PLUGIN_ROOT}/scan.mjs" --next-info`
@@ -15,10 +17,12 @@ The `SESSION_ID`, `TITLE`, and `PROJECT` values are JSON string literals; `TITLE
 
 `QUEUE_INDEX` is the position of the item in the queue. It is usually `0`, the front. While streamer mode is on, items that are not on stream are deferred and `QUEUE_INDEX` skips them. Never mention, count or show deferred items, and ignore `DEFERRED`: the chat may be on stream.
 
+Every response, including early-stop and non-orchestrator replies, must end with `Office: [<URL>](<URL>)` using the URL from the `--ensure` status line.
+
 If the output is `QUEUE: empty`, say `Queue is empty.` and stop. If it is `QUEUE: nothing on air`, say `Nothing on air in the queue.` and stop, the same way. Do not request usage, write focus, or modify the queue. If `SESSION_ID` is `"none"`, there is no session; do not request usage or write focus. Write `Session: none` and use the context fallback. If `TITLE_AVAILABLE` is `false`, say `Exact session title unavailable; item left in queue.` and stop. Do not request usage, write focus, or modify the queue.
 
 1. For a session, get its context usage. If the host has a session usage tool (in the Claude desktop app: `get_usage` with `session_id` set to the decoded SESSION_ID), call it and take `context.percentUsed`. Do this every time; never reuse an earlier number.
-2. Show the front item to the user in exactly this shape. The Session and Context lines are required on every item; an answer without them is wrong.
+2. Show the front item to the user in this shape, then append the required Office line. The Session and Context lines are required on every item; an answer without them is wrong.
 
    **<the item, in plain words>**
    Session: "<decoded TITLE, character for character>" (<decoded PROJECT>) · Context: <N>% used
