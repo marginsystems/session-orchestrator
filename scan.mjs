@@ -185,12 +185,13 @@ function desktopSessions() {
   } catch {
     return out;
   }
-  out.available = true;
+  let complete = true;
   for (const a of level1) {
     let level2;
     try {
       level2 = readdirSync(join(DESKTOP_SESSIONS, a));
     } catch {
+      complete = false;
       continue;
     }
     for (const b of level2) {
@@ -198,6 +199,7 @@ function desktopSessions() {
       try {
         files = readdirSync(join(DESKTOP_SESSIONS, a, b));
       } catch {
+        complete = false;
         continue;
       }
       for (const f of files) {
@@ -207,6 +209,7 @@ function desktopSessions() {
         try {
           st = statSync(p);
         } catch {
+          complete = false;
           continue;
         }
         let rec = desktopCache.get(p);
@@ -220,9 +223,11 @@ function desktopSessions() {
           desktopCache.set(p, rec);
         }
         if (rec.local && rec.cli) out.set(rec.local, rec);
+        else complete = false;
       }
     }
   }
+  out.available = complete;
   return out;
 }
 
