@@ -444,10 +444,10 @@ function httpReq(port, { method = 'GET', path = '/', headers = {}, body, host })
   });
 }
 
-function writeQueue(root, ids) {
+function writeQueue(root, ids, orchestrator = null) {
   const dir = join(root, '.session-orchestrator');
   mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, 'queue.json'), JSON.stringify({ at: new Date().toISOString(), items: ids.map((sessionId) => ({ sessionId })) }));
+  writeFileSync(join(dir, 'queue.json'), JSON.stringify({ at: new Date().toISOString(), orchestrator, items: ids.map((sessionId) => ({ sessionId })) }));
 }
 
 function makeFixture(root) {
@@ -653,6 +653,13 @@ if (want('server')) {
   const visits = s.events.filter((e) => e.kind === 'boss_visit' && e.at >= t0);
   check(visits.length === 1 && visits[0].to === atlasWorking.id && Number.isFinite(visits[0].at), `boss_visit events wrong: ${JSON.stringify(visits)}`);
   check(!s.events.some((e) => e.kind === 'boss_visit' && e.at >= t0 && e.to === deltaWorking.id), 'system or tool lines produced a boss_visit');
+  const queueFile = join(fixtureHome, '.session-orchestrator', 'queue.json');
+  writeFileSync(queueFile, JSON.stringify({ ...JSON.parse(readFileSync(queueFile, 'utf8')), at: nowIso(), orchestrator: deltaWorking.uuid }));
+  const t1 = Date.now() - 500;
+  appendFileSync(deltaWorking.file, JSON.stringify({ type: 'user', userType: 'external', cwd: '/work/delta', timestamp: nowIso(), message: { role: 'user', content: 'next' } }) + '\n');
+  appendFileSync(atlasWorking.file, JSON.stringify({ type: 'user', userType: 'external', cwd: '/work/atlas', timestamp: nowIso(), message: { role: 'user', content: 'and the docs' } }) + '\n');
+  s = await waitState(SPORT, (st) => st.events.some((e) => e.kind === 'boss_visit' && e.at >= t1));
+  check(!s.events.some((e) => e.kind === 'boss_visit' && e.at >= t1 && e.to === deltaWorking.id), 'a prompt in the orchestrator session sent the boss out');
 
   const echoDir = join(fixtureHome, '.claude', 'projects', '-work-echo');
   mkdirSync(echoDir, { recursive: true });

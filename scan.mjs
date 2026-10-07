@@ -302,16 +302,16 @@ function readQueue(now, desktop) {
   try {
     const f = JSON.parse(readFileSync(QUEUE_FILE, 'utf8'));
     const at = Date.parse(f.at);
-    if (!Number.isFinite(at) || at > now + 60000 || now - at >= FOCUS_MAX_MS || !Array.isArray(f.items)) return { uuids: [], size: 0 };
+    if (!Number.isFinite(at) || at > now + 60000 || now - at >= FOCUS_MAX_MS || !Array.isArray(f.items)) return { uuids: [], size: 0, orchestrator: '' };
     const items = f.items.slice(0, QUEUE_MAX);
     const uuids = [];
     for (const it of items) {
       const uuid = toUuid(typeof it === 'string' ? it : it && it.sessionId, desktop);
       if (uuid && !uuids.includes(uuid)) uuids.push(uuid);
     }
-    return { uuids, size: items.length };
+    return { uuids, size: items.length, orchestrator: toUuid(f.orchestrator, desktop) };
   } catch {
-    return { uuids: [], size: 0 };
+    return { uuids: [], size: 0, orchestrator: '' };
   }
 }
 
@@ -455,7 +455,7 @@ function scan(now = Date.now()) {
       events.push({ id: 'e' + sha(from + agent.id + Math.floor(m.at / 1000)).slice(0, 10), kind: 'message', at: m.at, from, to: agent.id });
     }
     for (const p of s.info.prompts) {
-      if (now - p.at > EVENT_MS) continue;
+      if (now - p.at > EVENT_MS || s.uuid === queueFile.orchestrator) continue;
       events.push({ id: 'p' + sha('boss' + agent.id + Math.floor(p.at / 1000)).slice(0, 10), kind: 'boss_visit', at: p.at, to: agent.id });
     }
     const joined = joinAt.get(s.uuid);

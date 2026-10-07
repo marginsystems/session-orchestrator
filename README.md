@@ -101,8 +101,10 @@ An orchestrator session (or anything else) writes `~/.session-orchestrator/focus
 The waiting room is the orchestrator's queue. The orchestrator writes it to `~/.session-orchestrator/queue.json` whenever the queue changes:
 
 ```
-{"at": "2026-10-06T12:00:00Z", "items": [{"sessionId": "local_..."}, {"sessionId": null}]}
+{"at": "2026-10-06T12:00:00Z", "orchestrator": "local_...", "items": [{"sessionId": "local_..."}, {"sessionId": null}]}
 ```
+
+`orchestrator` is the orchestrator session's own id: prompts typed there do not send the boss out of his office.
 
 Every queued session stands in the waiting room in that order, front first; items without a session are skipped. `scan.mjs` only reads the file. A missing file or one older than 24 hours means an empty waiting room. `state.json` lists the queued agents in `queue` and the total number of items in `queue.json`, including items without a session, in `queueSize`.
 
