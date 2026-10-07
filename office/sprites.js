@@ -40,7 +40,7 @@ const bake = function (key, w, h, grid, map) {
   if (cv) return cv;
   if (bcache.size > 1500) bcache.clear();
   cv = document.createElement('canvas'); cv.width = w; cv.height = h;
-  const c = cv.getContext('2d');
+  const c = context2d(cv);
   for (let y = 0; y < h; y++) {
     const row = grid[y] || '';
     if (row.length !== w && row.length) console.error('bad sprite row width', key, y, row.length);

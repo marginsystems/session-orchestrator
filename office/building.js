@@ -1,23 +1,22 @@
 'use strict';
 
 const cv = canvasById('cv');
-let ctx = cv.getContext('2d');
+let ctx = context2d(cv);
 const withCtx = (c, fn) => { const p = ctx; ctx = c; try { fn(); } finally { ctx = p; } };
-const stageEl = document.getElementById('stage');
-const wrapEl = document.getElementById('wrap');
-const gearEl = document.getElementById('gear');
+const stageEl = elementById('stage');
+const wrapEl = elementById('wrap');
+const gearEl = elementById('gear');
 const uc = canvasById('uc');
-const uiEl = document.getElementById('ui');
-const hitEl = document.getElementById('hit');
-const statEl = document.getElementById('stat');
+const uiEl = elementById('ui');
+const hitEl = elementById('hit');
+const statEl = elementById('stat');
 const stCv = document.createElement('canvas');
-const stC = stCv.getContext('2d');
+const stC = context2d(stCv);
 
-const S = { rooms: [], floors: [BOSS, LOBBY], agents: new Map(), slots: new Map(), Hf: 70, s: 2, dpr: 1, LW: 380, LH: 300, t: 0, dt: 0.07, dim: 0, sig: '', tasks: [], vid: 0, sky: 'day', counts: { working: 0, waiting: 0, idle: 0 }, msg: '', focus: null, frames: 0, dyn: { coffees: [] }, set: null, last: null, queue: [], want: [], anim: null, fc: null, bgCv: null, posting: 0, wall: new Map(), visits: [], visitLog: [], drops: new Map(), puffs: [], joined: new Set(), firstApplied: false, gotState: false, setReady: false, particles: [] };
-const E = { fy: 0, open: 0, moving: false, queue: [], rider: null, use: new Map(), ding: null };
+const speech = (text, t0, lift = 0) => ({ text, t0, lift });
 
 const newAgent = function (d) {
-  return { id: d.id, name: d.name, state: d.state, sleepy: !!d.sleepy, room: d.room, fr: d.room, slot: -1, x: 0, sit: 1, facing: 1, phase: 0, walking: false, away: false, q: false, title: d.title || '', inCab: false, alpha: 1, bubble: null, gone: false, visitor: false, hop: 0, react: -9, seed: hash(d.id), st: styleFor(d.id) };
+  return { id: d.id, name: d.name, state: d.state, sleepy: !!d.sleepy, room: d.room, fr: d.room, slot: -1, x: 0, sit: 1, facing: 1, phase: 0, walking: false, away: false, q: false, title: d.title || '', inCab: false, alpha: 1, bubble: TYPE_ONLY ? speech('', 0) : null, gone: false, visitor: false, hop: 0, react: -9, seed: hash(d.id), st: styleFor(d.id), boss: false, spd: 0, joining: false, leaving: false };
 };
 
 const BS = { react: -9, style: styleFor('boss', true) };
@@ -25,6 +24,11 @@ const B = { ...newAgent({ id: 'boss', name: 'Boss', state: 'working', room: BOSS
 const BOSS_VISIT_TEXTS = ["HERE'S THE PLAN", "LET'S DO IT", 'GOT A MINUTE?'];
 const SEC_STYLE = { boss: false, fur: { o: '#7a2c3d', b: '#f4b6c2', s: '#d9778f', l: '#ffe5ea' }, acc: '#1a1c2c', ear: 'cat', accKind: 'glasses', screen: 0, key: 'secretary' };
 const SEC = { t0: -9, fake: { seed: 5, state: 'working', hop: 0, react: -9, sleepy: false, sit: 1, boss: true } };
+
+const newAnim = (t0, from, slide, out, keepH) => ({ t0, dur: out.length ? 0.9 : 0.8, from: new Map(from.map((id, i) => [id, i])), p: 0, pf: 0, ps: 0, slide, out, keepH });
+
+const S = { rooms: TYPE_ONLY ? [{ id: '', label: '' }] : [], floors: [BOSS, LOBBY], agents: new Map(TYPE_ONLY ? [['', B]] : []), slots: new Map(TYPE_ONLY ? [['', ['']]] : []), Hf: 70, s: 2, dpr: 1, LW: 380, LH: 300, t: 0, dt: 0.07, dim: 0, sig: '', tasks: TYPE_ONLY ? [{ gen: wait(0), done: false }] : [], vid: 0, sky: 'day', counts: { working: 0, waiting: 0, idle: 0 }, msg: '', focus: TYPE_ONLY ? { token: '', agentId: '' } : null, frames: 0, dyn: { coffees: TYPE_ONLY ? [{ id: '', x: 0, dy: 0 }] : [] }, set: { ...DEF_SET }, last: TYPE_ONLY ? { rooms: [{ id: '', label: '' }] } : null, queue: TYPE_ONLY ? [''] : [], want: TYPE_ONLY ? [''] : [], anim: TYPE_ONLY ? newAnim(0, [], [], [], 0) : null, fc: TYPE_ONLY ? new Map([['', stCv]]) : null, bgCv: TYPE_ONLY ? stCv : null, posting: 0, wall: new Map(), visits: TYPE_ONLY ? [''] : [], visitLog: TYPE_ONLY ? [{ id: '', agentAway: false, agentBubble: false, answered: false }] : [], drops: new Map(), puffs: TYPE_ONLY ? [{ x: 0, y: 0, t0: 0 }] : [], joined: new Set(), firstApplied: false, gotState: false, setReady: false, particles: TYPE_ONLY ? [{ x: 0, y: 0, vx: 0, vy: 0, col: '', life: 0, sz: 0 }] : [] };
+const E = { fy: 0, open: 0, moving: false, queue: TYPE_ONLY ? [{ a: B, fromRoom: '', toRoom: '', state: '' }] : [], rider: TYPE_ONLY ? B : null, use: new Map(), ding: TYPE_ONLY ? { f: 0, t0: 0 } : null };
 
 const T0 = () => (HUD ? HUDH : 0) + ROOFH;
 const fIdxN = (id) => { const i = S.floors.indexOf(id); return i < 0 ? S.floors.length - 1 : i; };
@@ -122,7 +126,7 @@ const labelLines = function (id) {
   return { rows, h: rows.length * 8 + 4 };
 };
 
-let curFloor = null;
+let curFloor = TYPE_ONLY ? { id: '', top: 0 } : null;
 const drawFloor = function (c, i, id, collect) {
   curFloor = collect ? { id, top: floorTop(i) } : null;
   const Hf = S.Hf, top = floorTop(i), fy = footY(i), BL = BM, BR = S.LW - BM, EX = EXC();
@@ -255,7 +259,7 @@ const drawStatic = function () {
 const floorCanvas = function (i, id) {
   const f = document.createElement('canvas');
   f.width = S.LW; f.height = S.Hf;
-  const c = f.getContext('2d');
+  const c = context2d(f);
   c.imageSmoothingEnabled = false;
   c.translate(0, -floorTop(i));
   drawFloorFull(c, i, id, false);
@@ -279,7 +283,7 @@ const beginAnim = function (old, added, ghosts, oldLH) {
   if (keepH > S.LH) setCanvasH(keepH);
   const bg = document.createElement('canvas');
   bg.width = S.LW; bg.height = keepH;
-  const bc = bg.getContext('2d');
+  const bc = context2d(bg);
   bc.imageSmoothingEnabled = false;
   drawBg(bc);
   R(bc, BM, T0(), S.LW - 2 * BM, S.floors.length * S.Hf, '#1a1c2c');
@@ -288,5 +292,5 @@ const beginAnim = function (old, added, ghosts, oldLH) {
   const slide = new Set((added || []).filter((id) => (S.slots.get(id) || []).every((aid) => !aid || (S.agents.get(aid) || {}).joining)));
   S.animCount = (S.animCount || 0) + 1;
   const out = (ghosts || []).map((g) => ({ i: g.i, cv: ghostCanvas(g) }));
-  S.anim = { t0: S.t, dur: out.length ? 0.9 : 0.8, from: new Map(old.map((id, i) => [id, i])), p: 0, pf: 0, ps: 0, slide, out, keepH };
+  S.anim = newAnim(S.t, old, slide, out, keepH);
 };

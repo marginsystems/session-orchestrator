@@ -24,6 +24,10 @@ Never commit, and never put in an issue or PR: real paths, user names, session i
 
 `index.html?demo=1` must keep working when opened from disk (`file://`). Page code uses classic scripts, not ES modules: it lives in `office/*.js`, loaded in order by `index.html`. Keep each file under 800 lines.
 
+## Typed state without comments
+
+`tsconfig.page.json` has `strictNullChecks` on. Page code has no JSDoc, so a field that starts empty gets its type from an example behind the `TYPE_ONLY` constant in `office/base.js`: `anim: TYPE_ONLY ? newAnim(0, [], [], [], 0) : null`, `queue: TYPE_ONLY ? [''] : []`. The example is never evaluated. Look up DOM nodes with `elementById` and `canvasById`, and canvas contexts with `context2d`.
+
 ## Every PR has a GitHub issue first
 
 Create a GitHub issue before opening a PR. The issue title is the problem. Put `Closes #N` in the PR body. Use existing labels; do not invent new ones.

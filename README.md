@@ -139,7 +139,7 @@ For each transcript in `~/.claude/projects/<slug>/<uuid>.jsonl` modified in the 
 
 `scan.mjs` is the server and `lib/` holds its helpers. `index.html` holds the markup and styles; the page code lives in `office/*.js`, classic scripts loaded in this order:
 
-- `base.js`: query params, constants, palette, math and random helpers, pixel fonts and text drawing.
+- `base.js`: query params, constants, palette, math and random helpers, pixel fonts and text drawing, the typed lookups (`elementById`, `canvasById`, `context2d`) and the `TYPE_ONLY` type-example constant.
 - `sprites.js`: critter sprite data and the head and body canvases.
 - `props.js`: windows, furniture and desk drawing.
 - `building.js`: state, layout, floors, walls, labels, static layers and the floor animation.

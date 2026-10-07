@@ -8,9 +8,10 @@ const ICON = {
 };
 const icon = function (c, name, x, y, col) { const g = ICON[name]; c.drawImage(bake('ic' + name + col, g[0].length, g.length, g, { o: col }), x, y); };
 
-let uctx = uc.getContext('2d');
+let uctx = context2d(uc);
 const U = { u: 2, W: 0, H: 0 };
-const UI = { settings: false, tour: null, drag: null, scroll: 0, items: [], geo: null, dialog: null, strip: null, dirty: true, focusId: '', refocus: null };
+const newDrag = (id, pid, y, order) => ({ id, pid, y0: y, y, order, moved: false });
+const UI = { settings: false, tour: TYPE_ONLY ? newTour() : null, drag: TYPE_ONLY ? newDrag('', 0, 0, ['']) : null, scroll: 0, items: TYPE_ONLY ? [{ id: '', kind: '', x: 0, y: 0, w: 0, h: 0 }] : [], geo: TYPE_ONLY ? { x: 0, y: 0, w: 0, h: 0, ix: 0, iw: 0, listY: 0, rows: 0, n: 0, rooms: [{ id: '', label: '' }], optY: 0, speedY: 0, soundY: 0, resetY: 0 } : null, dialog: TYPE_ONLY ? { x: 0, y: 0, w: 0, h: 0, lines: [''] } : null, strip: TYPE_ONLY ? { x: 0, y: 0, w: 0, h: 0 } : null, dirty: true, focusId: '', refocus: TYPE_ONLY ? '' : null };
 const RH = 13;
 
 const CONF = ['#ef7d57', '#ffcd75', '#a7f070', '#73eff7', '#b86fd1', '#f4f4f4', '#41a6f6', '#b13e53'];
@@ -21,7 +22,7 @@ const uiMeasure = function () {
   const u = Math.max(S.s, Math.ceil(2 * dpr - 1e-6));
   U.u = u; U.W = Math.max(120, Math.floor(devW / u)); U.H = Math.max(120, Math.floor(devH / u));
   uc.width = U.W; uc.height = U.H;
-  uctx = uc.getContext('2d');
+  uctx = context2d(uc);
   uctx.imageSmoothingEnabled = false;
   const cw = U.W * u / dpr, ch = U.H * u / dpr;
   uc.style.width = cw + 'px'; uc.style.height = ch + 'px';
@@ -70,7 +71,7 @@ const uiLayout = function () {
     const ph = fixed + rows * RH;
     const px0 = (W - pw) >> 1, py0 = T ? 4 : Math.max(4, Math.floor((floorY - ph) / 2));
     const ix = px0 + 6, iw = pw - 12;
-    const g = { x: px0, y: py0, w: pw, h: ph, ix, iw, listY: py0 + 15 + 22, rows, n, rooms };
+    const g = { x: px0, y: py0, w: pw, h: ph, ix, iw, listY: py0 + 15 + 22, rows, n, rooms, optY: 0, speedY: 0, soundY: 0, resetY: 0 };
     UI.geo = g;
     if (!T) items.push({ id: 'scrim', kind: 'scrim', label: 'Close settings', x: 0, y: 0, w: W, h: H, tab: -1 });
     items.push({ id: 'blocker:panel', kind: 'blocker', x: px0, y: py0, w: pw, h: ph, tab: -1 });
@@ -98,7 +99,7 @@ const uiLayout = function () {
     items.push({ id: 'reset', kind: 'reset', label: 'Reset onboarding', x: ix, y, w: iw, h: 12 });
     g.resetY = y;
   }
-  if (T) {
+  if (T && UI.dialog) {
     const d = UI.dialog, last = T.step === STEPS.length - 1;
     items.push({ id: 'blocker:dialog', kind: 'blocker', x: d.x, y: d.y, w: d.w, h: d.h, tab: -1 });
     const nw = 29;
@@ -136,7 +137,7 @@ const syncHit = function () {
   }
 };
 
-hitEl.addEventListener('focusin', (e) => { const t = e.target; UI.focusId = t instanceof HTMLElement && t.matches(':focus-visible') ? t.dataset.id : ''; });
+hitEl.addEventListener('focusin', (e) => { const t = e.target; UI.focusId = t instanceof HTMLElement && t.matches(':focus-visible') ? t.dataset.id ?? '' : ''; });
 hitEl.addEventListener('focusout', () => { UI.focusId = ''; });
 hitEl.addEventListener('wheel', (e) => {
   if (!UI.geo || UI.geo.n <= UI.geo.rows) return;
@@ -151,7 +152,7 @@ const wireRow = function (b, it) {
   b.addEventListener('pointerdown', (e) => {
     if (e.button) return;
     const y = logicalY(e);
-    UI.drag = { id: it.rid, pid: e.pointerId, y0: y, y, order: listIds(), moved: false };
+    UI.drag = newDrag(it.rid, e.pointerId, y, listIds());
     try { b.setPointerCapture(e.pointerId); } catch {}
     e.preventDefault();
   });
@@ -277,6 +278,7 @@ const drawPanel = function () {
   if (!g) return;
   framePx(g.x, g.y, g.w, g.h, 'SETTINGS');
   const cl = UI.items.find((i) => i.kind === 'close');
+  if (!cl) return;
   uR(cl.x, cl.y, cl.w, cl.h, '0'); uR(cl.x + 1, cl.y + 1, cl.w - 2, cl.h - 2, '2');
   icon(uctx, 'x', cl.x + 3, cl.y + 3, '#f4f4f4');
   ring(cl);
@@ -305,7 +307,7 @@ const drawPanel = function () {
     if (D && D.moved && D.id === id) { uR(g.ix, ry, g.iw, RH - 1, '#0f1020'); continue; }
     drawRow(id, ry, false);
     const upI = UI.items.find((x) => x.id === 'up:' + id), dnI = UI.items.find((x) => x.id === 'down:' + id);
-    for (const [bi, nm, dis] of [[upI, 'up', idx === 0], [dnI, 'down', idx === order.length - 1]]) {
+    for (const { bi, nm, dis } of [{ bi: upI, nm: 'up', dis: idx === 0 }, { bi: dnI, nm: 'down', dis: idx === order.length - 1 }]) {
       if (!bi) continue;
       uR(bi.x, bi.y, bi.w, bi.h, '0'); uR(bi.x + 1, bi.y + 1, bi.w - 2, bi.h - 2, dis ? '#1a1c2c' : '#566c86');
       icon(uctx, nm, bi.x + 1, bi.y + 3, dis ? '#333c57' : '#f4f4f4');

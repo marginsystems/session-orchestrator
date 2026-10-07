@@ -1,7 +1,5 @@
 'use strict';
 
-S.set = { ...DEF_SET };
-
 const step = function (dt) {
   S.dt = dt; S.t += dt;
   for (const task of [...S.tasks]) {

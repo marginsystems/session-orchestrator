@@ -75,7 +75,7 @@ const applyState = function (raw) {
   const reorder = S.ready && !first && (added.length > 0 || removed.length > 0 || moved);
   const ghosts = removed.map((id) => ({ id, i: oldFloors.indexOf(id), label: (oldRooms.find((r) => r.id === id) || {}).label || '', slots: (oldSlots.get(id) || []).map((x) => (x && S.agents.has(x) ? x : null)), wall: oldWall.get(id) }));
   for (const a of S.agents.values()) if (!roomIds.has(a.fr) && a.fr !== LOBBY && a.fr !== BOSS && !a.away) a.fr = a.room;
-  const ei = S.floors.indexOf(efid);
+  const ei = typeof efid === 'string' ? S.floors.indexOf(efid) : -1;
   E.fy = ei >= 0 ? ei : clamp(E.fy, 0, S.floors.length - 1);
   E.fid = reorder && ei >= 0 && !E.moving ? efid : null;
   const list = [...S.agents.values()].filter((a) => !a.visitor && !a.gone);
@@ -128,7 +128,6 @@ const poll = async function () {
   }
 };
 
-const DEF_SET = { order: [], anonymize: false, titles: false, speed: 1, sound: false, onboardedAt: null };
 const LS_KEY = DEMO ? 'so.settings.demo' : 'so.settings';
 const cleanSet = (o) => {
   const r = { ...DEF_SET };
@@ -139,7 +138,7 @@ const cleanSet = (o) => {
   if (typeof o.onboardedAt === 'string') r.onboardedAt = o.onboardedAt;
   return r;
 };
-const lsRead = function () { try { return JSON.parse(localStorage.getItem(LS_KEY)); } catch { return null; } };
+const lsRead = function () { try { return JSON.parse(localStorage.getItem(LS_KEY) ?? 'null'); } catch { return null; } };
 const lsWrite = function (o) { try { localStorage.setItem(LS_KEY, JSON.stringify(o)); } catch {} };
 
 let postChain = Promise.resolve();

@@ -19,13 +19,16 @@ const stepText = function (i) {
   return STEPS[i];
 };
 
+const newTour = () => ({ step: 0, t0: S.t, text: '', shown: 0, did: false, token: 0 });
+
 const tourStart = function () {
-  UI.tour = { step: 0, t0: S.t, text: '', shown: 0, did: false, token: 0 };
+  UI.tour = newTour();
   enterStep(0);
 };
 
 const enterStep = function (i) {
   const T = UI.tour;
+  if (!T) return;
   T.step = i; T.t0 = S.t; T.did = false; T.token++;
   T.text = stepText(i); T.shown = 0;
   UI.settings = i === 3;
@@ -84,7 +87,7 @@ const tourSummon = function* (tok) {
       yield* until(() => !B.away || !alive());
       yield* wait(0.2);
       BS.react = S.t; S.focusVisitor = a;
-      a.bubble = { text: 'GOT A DECISION', t0: S.t };
+      a.bubble = speech('GOT A DECISION', S.t);
       yield* until(() => !alive());
       a.bubble = null; S.focusVisitor = null;
       yield* wait(0.3);
@@ -129,7 +132,7 @@ const drawStrip = function (t) {
 
 const drawDialog = function (t) {
   const d = UI.dialog, T = UI.tour;
-  if (!d) return;
+  if (!d || !T) return;
   uR(d.x, d.y, d.w, d.h, '#f7e6bd'); uR(d.x + 2, d.y + 2, d.w - 4, d.h - 4, '#1a1c2c');
   uR(d.x + 3, d.y + 3, d.w - 6, d.h - 6, '#202339');
   uR(d.x + 6, d.y + 6, 30, 24, '#5d275d'); uR(d.x + 6, d.y + 6, 30, 1, '#7d4698');
@@ -147,7 +150,7 @@ const drawDialog = function (t) {
   }
   const info = (T.step + 1) + '/' + STEPS.length;
   const sk = UI.items.find((i) => i.kind === 'skip');
-  uT(info, sk.x - 6 - textW(info), sk.y + 2, '#94b0c2');
+  if (sk) uT(info, sk.x - 6 - textW(info), sk.y + 2, '#94b0c2');
   for (const it of UI.items) {
     if (it.kind === 'next') button(it, !typing && Math.floor(t * 2.5) % 2 ? '#a7f070' : T.step === STEPS.length - 1 ? '#ffcd75' : '#38b764', '#1a1c2c', T.step === STEPS.length - 1 ? 'DONE' : 'NEXT');
     else if (it.kind === 'skip') button(it, '#333c57', '#d6d6e0', 'SKIP');

@@ -151,7 +151,7 @@ const drawDrops = function () {
     const a = S.agents.get(id);
     if (!a) continue;
     const p = clamp((S.t - d.t0) / 0.38, 0, 1), fy = footY(fIdx(a.room));
-    if (!d.cv) { d.cv = document.createElement('canvas'); d.cv.width = 48; d.cv.height = 48; drawStation(d.cv.getContext('2d'), 10, 34, a); }
+    if (!d.cv) { d.cv = document.createElement('canvas'); d.cv.width = 48; d.cv.height = 48; drawStation(context2d(d.cv), 10, 34, a); }
     const off = -Math.round((1 - p * p) * 30);
     ctx.drawImage(d.cv, slotX(a.room, a.slot) - 10, fy - 34 + off);
   }
@@ -298,7 +298,7 @@ const drawCab = function (t) {
 
 const draw = function (t) {
   ctx.clearRect(0, 0, S.LW, cv.height);
-  if (S.anim && S.bgCv) {
+  if (S.anim && S.bgCv && S.fc) {
     ctx.drawImage(S.bgCv, 0, 0);
     for (const g of S.anim.out) ctx.drawImage(g.cv, -Math.round(S.anim.ps * S.LW), floorTop(g.i));
     for (const [id, f] of S.fc) ctx.drawImage(f, S.anim.slide.has(id) ? -Math.round((1 - S.anim.p) * S.LW) : 0, floorTop(fIdx(id)));

@@ -65,7 +65,7 @@ const smallCv = function (t, col) {
   if (tcache.size > 400) tcache.clear();
   cv = document.createElement('canvas');
   cv.width = Math.max(1, smallW(t)); cv.height = 5;
-  const c = cv.getContext('2d');
+  const c = context2d(cv);
   c.fillStyle = col;
   let x0 = 0;
   for (const ch of t) {
@@ -84,7 +84,7 @@ const textCv = function (t, col, sm) {
   if (tcache.size > 400) tcache.clear();
   cv = document.createElement('canvas');
   cv.width = Math.max(1, t.length * 6 - 1); cv.height = 7;
-  const c = cv.getContext('2d');
+  const c = context2d(cv);
   c.fillStyle = col;
   [...t].forEach((ch, i) => {
     const g = GLYPHS[ch] || GLYPHS['-'];
@@ -112,7 +112,7 @@ const splitName = function (s, pw) {
   for (const ch of s) { cur += ch; if (' -_.'.includes(ch)) { toks.push(cur); cur = ''; } }
   if (cur) toks.push(cur);
   for (const sm of [0, 1]) {
-    let best = null;
+    let best = TYPE_ONLY ? { m: 0, rows: [{ t: '', sm: 0 }] } : null;
     for (let k = 1; k < toks.length; k++) {
       const a = toks.slice(0, k).join('').trimEnd(), b = toks.slice(k).join('').trimStart();
       const wa = fitW(a, sm), wb = fitW(b, sm);
@@ -134,6 +134,18 @@ const canvasById = function (id) {
   if (!(el instanceof HTMLCanvasElement)) throw new Error('missing canvas ' + id);
   return el;
 };
+const elementById = function (id) {
+  const el = document.getElementById(id);
+  if (!(el instanceof HTMLElement)) throw new Error('missing element ' + id);
+  return el;
+};
+const context2d = function (canvas) {
+  const c = canvas.getContext('2d');
+  if (!c) throw new Error('2d canvas context unavailable');
+  return c;
+};
+const TYPE_ONLY = false;
+const DEF_SET = { order: TYPE_ONLY ? [''] : [], anonymize: false, titles: false, speed: 1, sound: false, onboardedAt: TYPE_ONLY ? '' : null };
 
 const R = (c, x, y, w, h, col) => { c.fillStyle = PAL[col] || col; c.fillRect(Math.round(x), Math.round(y), Math.round(w), Math.round(h)); };
 const px = (c, x, y, col) => R(c, x, y, 1, 1, col);

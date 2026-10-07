@@ -134,7 +134,7 @@ const trip = function* (a, bid, text) {
     yield* goTo(a, b.room, slotX(b.room, b.slot) - VIS_DX);
     a.facing = 1;
     yield* wait(0.2);
-    a.bubble = { text, t0: S.t }; b.react = S.t;
+    a.bubble = speech(text, S.t); b.react = S.t;
     yield* wait(2.4);
     a.bubble = null;
     yield* wait(0.15);
@@ -156,15 +156,15 @@ const bossVisit = function* (id) {
   yield* goTo(B, a.room, slotX(a.room, Math.max(0, a.slot)) - VIS_DX);
   B.facing = 1;
   yield* wait(0.2);
-  const mine = { text: BOSS_VISIT_TEXTS[hash(id + S.visits.length + Math.floor(S.t)) % BOSS_VISIT_TEXTS.length], t0: S.t, lift: 15 };
+  const mine = speech(BOSS_VISIT_TEXTS[hash(id + S.visits.length + Math.floor(S.t)) % BOSS_VISIT_TEXTS.length], S.t, 15);
   B.bubble = mine;
   a.react = S.t;
   yield* wait(0.5);
-  let reply = null;
+  let reply = TYPE_ONLY ? speech('', 0) : null;
   const entry = { id, agentAway: a.away, agentBubble: !!a.bubble, answered: false };
   S.visitLog.push(entry);
   if (S.visitLog.length > 100) S.visitLog.shift();
-  if (!a.away && !a.bubble) { reply = { text: 'ON IT, BOSS!', t0: S.t }; a.bubble = reply; entry.answered = true; }
+  if (!a.away && !a.bubble) { reply = speech('ON IT, BOSS!', S.t); a.bubble = reply; entry.answered = true; }
   yield* wait(2.5);
   B.bubble = null;
   if (reply && a.bubble === reply) a.bubble = null;
@@ -232,7 +232,7 @@ const focusTrip = function* (a, token, fromLine) {
       yield* until(() => !B.away || !alive());
       yield* wait(0.2);
       BS.react = S.t; S.focusVisitor = a;
-      a.bubble = { text: BOSS_TEXTS[hash(token) % BOSS_TEXTS.length], t0: S.t };
+      a.bubble = speech(BOSS_TEXTS[hash(token) % BOSS_TEXTS.length], S.t);
       yield* until(() => !alive());
       a.bubble = null; S.focusVisitor = null;
       yield* wait(0.3);
@@ -289,6 +289,7 @@ const syncLine = function () {
   S.want = want;
   for (const id of want) {
     const a = S.agents.get(id);
+    if (!a) continue;
     if (!a.q && !a.away && a.sit > 0.99 && activeMovers() < 3) spawn(queueTask(a));
   }
 };
