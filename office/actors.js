@@ -58,6 +58,21 @@ const lobbyDoorProc = function* () {
   }
 };
 
+const releaseLobbyDoor = function* () {
+  yield* wait(0.35);
+  LD.users--;
+};
+
+const enterBuilding = function* (a) {
+  const x1 = lobbyDoorX();
+  a.fr = LOBBY; a.x = x1 - 6; a.alpha = 0; a.facing = 1; a.sit = 0;
+  LD.users++;
+  yield* until(() => LD.open > 0.95);
+  yield* tween(0.45, (p) => { a.x = x1 - 6 + 6 * p; a.alpha = p; });
+  a.alpha = 1;
+  spawn(releaseLobbyDoor());
+};
+
 const hopOnce = function* (a) {
   yield* tween(0.32, (p) => { a.hop = Math.sin(p * Math.PI) * 6; });
   a.hop = 0;
@@ -150,8 +165,7 @@ const exitBuilding = function* (a) {
   if (a.gone) yield* tween(0.45, (p) => { if (a.gone) { a.x = x0 - 6 * p; a.alpha = 1 - p; } });
   if (!a.gone) { a.alpha = 1; LD.users--; yield* leaveAndSit(a); return; }
   S.agents.delete(a.id);
-  yield* wait(0.35);
-  LD.users--;
+  yield* releaseLobbyDoor();
 };
 
 const leaveAndSit = function* (a) {
@@ -250,6 +264,7 @@ const bossProc = function* () {
 
 const joinTask = function* (a) {
   yield* until(() => !S.anim && activeMovers(a) < 3);
+  yield* enterBuilding(a);
   yield* wait(0.4);
   if (a.gone || a.slot < 0) { a.joining = false; yield* leaveAndSit(a); return; }
   S.drops.set(a.id, { t0: S.t });

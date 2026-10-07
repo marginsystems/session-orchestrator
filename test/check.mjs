@@ -360,17 +360,19 @@ async function joinCheck(page, tag, newProject) {
   const id = joined.id;
   check(!!id, `${tag} join hook returned nothing`);
   check(joined.pendingDesk, `${tag} join never showed the pending desk`);
-  let cab = false, seated = false, sawAnim = false;
+  let cab = false, seated = false, sawAnim = false, doorOpen = false;
   for (let i = 0; i < 900; i++) {
     await nap(page, 100);
-    const s = await page.evaluate((i2) => { const o = window.__office; return { a: o.agents().find((x) => x.id === i2), desks: o.desks(), anim: o.animating() }; }, id);
+    const s = await page.evaluate((i2) => { const o = window.__office; return { a: o.agents().find((x) => x.id === i2), desks: o.desks(), anim: o.animating(), door: o.lobbyDoor().open }; }, id);
     if (s.anim) sawAnim = true;
+    if (s.door > 0.9) doorOpen = true;
     if (!s.a) continue;
     if (s.a.inCab) cab = true;
     if (!s.a.away && s.a.sit === 1) { seated = true; break; }
   }
   check(seated, `${tag} new agent never sat down`);
   check(cab, `${tag} new agent skipped the elevator`);
+  check(doorOpen, `${tag} lobby door never opened for the new agent`);
   const d = await staticChecks(page, tag + ' after join');
   const mine = d.desks.find((k) => k.id === id);
   check(!!mine, `${tag} no desk for the new agent`);

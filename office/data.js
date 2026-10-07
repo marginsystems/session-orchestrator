@@ -43,7 +43,7 @@ const applyState = function (raw) {
     let a = S.agents.get(d.id);
     if (!a) {
       a = newAgent(d); S.agents.set(a.id, a);
-      if (joinIds.has(d.id)) { a.joining = true; a.away = true; a.fr = LOBBY; a.x = BM + 14; a.sit = 0; a.facing = 1; joiners.push(a); }
+      if (joinIds.has(d.id)) { a.joining = true; a.away = true; a.fr = LOBBY; a.x = BM + 8; a.alpha = 0; a.sit = 0; a.facing = 1; joiners.push(a); }
     }
     a.name = d.name; a.state = d.state; a.sleepy = !!d.sleepy; a.gone = false; a.title = d.title || '';
     if (a.room !== d.room) { a.room = d.room; if (!a.away) a.fr = d.room; }
