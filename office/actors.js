@@ -277,7 +277,7 @@ const queueTask = function* (a) {
   yield* leaveAndSit(a);
 };
 
-const settledAway = (a) => (a.q && a.fr === BOSS && !a.walking && !a.inCab) || a === S.focusVisitor;
+const settledAway = (a) => (a.q && a.fr === BOSS && !a.inCab) || a === S.focusVisitor;
 const activeMovers = (except) => [...S.agents.values()].filter((a) => a.away && a !== except && !settledAway(a)).length + (B.away && except !== B ? 1 : 0);
 
 const syncLine = function () {
