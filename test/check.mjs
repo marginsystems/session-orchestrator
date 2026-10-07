@@ -1168,6 +1168,130 @@ async function runNames(vw, vh, dpr, tag) {
   check(errors.length === 0, `${tag} names console errors ${errors.join('|')}`);
   await ctx.close();
 }
+
+const GENERIC_SAY = ['...', '?!', 'HMM', 'SO...', 'YEP', 'OH?'];
+function behaviorFixture() {
+  const rooms = [{ id: 'r1', label: 'alpha' }, { id: 'r2', label: 'beta' }, { id: 'r3', label: 'gamma' }];
+  const mk = (id, room, state, extra = {}) => ({ id, name: id.toUpperCase(), room, state, since: state === 'waiting' ? Number(id.slice(2)) + 1 : 0, ...extra });
+  const agents = [mk('bw0', 'r1', 'waiting'), mk('bw1', 'r1', 'waiting'), mk('bw2', 'r1', 'waiting'), mk('bk0', 'r1', 'working'), mk('bw3', 'r2', 'waiting'), mk('bw4', 'r2', 'waiting'), mk('bk1', 'r2', 'working'), mk('bi0', 'r3', 'idle'), mk('bi1', 'r3', 'idle', { sleepy: true }), mk('bi2', 'r3', 'idle')];
+  const queue = ['bw0', 'bw1', 'bw2', 'bw3', 'bw4'];
+  const line = ['bw0', 'bw1', null, 'bw2', 'bw3', null, 'bw4'];
+  return { rooms, agents, events: [], queue, queueSize: 7, line, generatedAt: Date.now() };
+}
+
+async function behaviorRun(vw, vh, tag, chaos, shots) {
+  const url = `file://${ROOT}/index.html?onboarding=0&chaos=${chaos}&speed=3`;
+  const { ctx, page, errors } = await open(vw, vh, 1, url, 600);
+  const st = behaviorFixture();
+  await ev(page, (s) => window.__office.load(s), st);
+  let ready = false;
+  for (let i = 0; i < 160 && !ready; i++) {
+    await sleep(400);
+    ready = await ev(page, () => window.__office.agents().filter((a) => a.queued).length === 5);
+  }
+  check(ready, `${tag} the five queued agents never settled in the waiting room`);
+  const dir = process.env.SHOTS_BEHAVIOR || join(SHOTS, 'behavior');
+  mkdirSync(dir, { recursive: true });
+  const taken = new Set();
+  const snap = async (name) => {
+    if (!shots || taken.has(name)) return;
+    taken.add(name);
+    await ev(page, () => { window['__rafKeep'] = window.requestAnimationFrame; window.requestAnimationFrame = () => 0; });
+    await sleep(120);
+    await page.screenshot({ path: join(dir, `${name}-${vw}.png`) });
+    await ev(page, () => { window.requestAnimationFrame = window['__rafKeep']; window.requestAnimationFrame((0, eval)('frame')); });
+  };
+  let maxDrift = 0, sawFace = false, sawDoze = null, workingMoved = false, sawWave = false;
+  const wake = { done: false };
+  const t0 = Date.now();
+  const limit = chaos === 0 ? 14000 : 80000;
+  while (Date.now() - t0 < limit) {
+    await sleep(chaos === 0 ? 500 : 150);
+    const d = await ev(page, () => ({ b: window.__office.behavior(), ag: window.__office.agents(), q: window.__office.queue() }));
+    d.q.want.forEach((id, i) => {
+      const a = d.ag.find((x) => x.id === id);
+      if (a && a.queued) maxDrift = Math.max(maxDrift, Math.abs(a.x - d.q.spots[i]));
+    });
+    for (const a of d.ag.filter((x) => x.id.startsWith('bk'))) if (a.away || a.sit !== 1) workingMoved = true;
+    const chats = d.b.poses.filter((p) => p.kind === 'chat').sort((a, b) => a.slot - b.slot);
+    for (let i = 0; i + 1 < chats.length; i++) if (chats[i + 1].slot === chats[i].slot + 1 && chats[i].dir === 1 && chats[i + 1].dir === -1) sawFace = true;
+    if (sawFace && d.b.poses.some((p) => p.text)) await snap('chat');
+    if (d.b.poses.filter((p) => ['hop', 'stretch', 'look'].includes(p.kind)).length >= 2) { sawWave = true; await snap('wave'); }
+    if (d.b.dozing.length) { sawDoze = sawDoze || d.b.dozing[0]; await snap('doze'); }
+    if (sawDoze && !wake.done && chaos > 0) {
+      wake.done = true;
+      const st2 = behaviorFixture();
+      st2.agents.find((a) => a.id === sawDoze).state = 'working';
+      await ev(page, (s) => window.__office.load(s), st2);
+      await sleep(250);
+      const dz = await ev(page, () => window.__office.behavior().dozing);
+      check(!dz.includes(sawDoze), `${tag} agent kept dozing after its real state changed to working`);
+      await ev(page, (s) => window.__office.load(s), behaviorFixture());
+    }
+    const b = d.b;
+    const chainOk = b.log.some((e) => e.chain >= 2);
+    if (chaos > 0 && chainOk && sawFace && sawDoze && sawWave && Date.now() - t0 > 20000) break;
+  }
+  const b = await ev(page, () => window.__office.behavior());
+  console.log(tag, 'chaos', chaos, 'log', b.log.length, 'maxDrift', maxDrift.toFixed(2));
+  check(!workingMoved, `${tag} a working agent left its desk`);
+  check(b.log.every((e) => e.state !== 'working'), `${tag} a working agent acted`);
+  check(b.log.filter((e) => e.act === 'doze').every((e) => e.state === 'idle'), `${tag} a non-idle agent dozed`);
+  check(maxDrift < 3, `${tag} a waiting agent drifted ${maxDrift}px from its slot`);
+  check(b.chaos === Number(chaos), `${tag} snapshot chaos ${b.chaos}`);
+  if (chaos === 0) {
+    check(b.log.length === 0 && b.poses.length === 0 && b.dozing.length === 0, `${tag} chaos=0 still acted: ${JSON.stringify(b.log.slice(0, 3))}`);
+  } else if (shots) {
+    const acts = b.log.filter((e) => ['hop', 'stretch', 'look'].includes(e.act));
+    check(acts.some((e) => e.chain === 1 && e.from === ''), `${tag} no fidget action happened`);
+    const chained = b.log.filter((e) => e.chain >= 2);
+    check(chained.length > 0, `${tag} no contagion chain of length 2 or more`);
+    check(b.log.every((e) => e.chain <= b.cap), `${tag} a chain outgrew the cap ${b.cap}`);
+    for (const e of chained) {
+      const parent = b.log.filter((p) => p.key === e.from && p.root === e.root && p.chain === e.chain - 1 && p.t <= e.t).pop();
+      if (parent) check(e.t - parent.t <= 3.6, `${tag} contagion fired ${e.t - parent.t}s after its source`);
+    }
+    check(b.log.filter((e) => e.act === 'chat').length > 0 && sawFace, `${tag} no adjacent pair faced each other to chat`);
+    const said = b.log.filter((e) => e.act === 'say');
+    check(said.length > 0 && said.every((e) => GENERIC_SAY.includes(e.text)), `${tag} chat bubbles not from the generic set: ${JSON.stringify(said.map((e) => e.text))}`);
+    check(sawDoze !== null, `${tag} nobody dozed next to a sleepy desk neighbour`);
+    check(b.log.filter((e) => e.act === 'doze').every((e) => ['bi0', 'bi2'].includes(e.key)), `${tag} dozing not limited to idle neighbours of the sleepy agent`);
+  }
+  if (shots && chaos > 0) {
+    const ag = await ev(page, () => window.__office.queue().want);
+    const st3 = behaviorFixture();
+    st3.agents.find((a) => a.id === 'bw0').state = 'working';
+    st3.queue = ag.slice(1);
+    st3.queueSize = 6;
+    st3.line = ['bw1', null, 'bw2', 'bw3', null, 'bw4'];
+    const rec = await ev(page, (s) => new Promise((res) => {
+      const o = window.__office;
+      const first = new Map(o.agents().filter((a) => a.queued).map((a) => [a.id, a.x]));
+      const started = new Map();
+      const tStart = o.behavior().t;
+      o.load(s);
+      const step = () => {
+        const t = o.behavior().t;
+        for (const a of o.agents()) if (first.has(a.id) && !started.has(a.id) && Math.abs(a.x - first.get(a.id)) > 0.5) started.set(a.id, t);
+        if (t - tStart > 5) res({ want: o.queue().want, started: [...started.entries()] });
+        else requestAnimationFrame(step);
+      };
+      requestAnimationFrame(step);
+    }), st3);
+    const starts = rec.want.map((id) => (rec.started.find((e) => e[0] === id) || [id, null])[1]).filter((v) => v !== null);
+    check(starts.length >= 3, `${tag} too few waiters stepped forward: ${JSON.stringify(rec)}`);
+    let ordered = true;
+    for (let i = 1; i < starts.length; i++) if (starts[i] < starts[i - 1] - 0.001) ordered = false;
+    check(ordered && starts[starts.length - 1] > starts[0], `${tag} waiters did not step forward as a ripple: ${JSON.stringify(starts)}`);
+  }
+  check(errors.length === 0, `${tag} behavior console errors ${errors.join('|')}`);
+  await ctx.close();
+}
+if (want('behavior') || want('ui')) {
+  await behaviorRun(1280, 720, 'b1280', 3, true);
+  await behaviorRun(390, 844, 'b390', 3, true);
+  await behaviorRun(1280, 720, 'b0', 0, false);
+}
 if (want('ui')) {
   const sizes = [[1280, 720], [1920, 1080], [750, 1000], [390, 844]];
   for (const dpr of [1, 2]) for (const [w, h] of sizes) await runNames(w, h, dpr, `n${w}x${dpr}`);

@@ -270,7 +270,13 @@ const queueTask = function* (a) {
     if (k < 0 || a.gone) break;
     const tx = lineX(slotOf(a.id));
     a.facing = -1;
-    if (Math.abs(a.x - tx) > 0.5) yield* walkTo(a, tx); else yield;
+    if (Math.abs(a.x - tx) > 0.5) {
+      const d = moveDelay(a);
+      if (d > 0) {
+        yield* wait(d);
+        if (S.want.indexOf(a.id) >= 0 && !a.gone && !(S.focus && S.focus.agentId === a.id)) yield* walkTo(a, lineX(slotOf(a.id)));
+      } else yield* walkTo(a, tx);
+    } else yield;
   }
   yield* until(() => activeMovers(a) < 3 || a.gone);
   a.q = false;

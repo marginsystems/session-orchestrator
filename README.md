@@ -52,7 +52,7 @@ Open http://127.0.0.1:7777. Node 18 or newer, no `npm install`.
 
 ### Demo, no server
 
-Open `index.html?demo=1` straight from disk. It runs a scripted office with generic names: ten agents in four rooms, a boss queue, boss visits, new sessions joining and the secretary flow. Add `&night=1` for dimmed lights, `&hud=0` to hide the header, `&speed=2` to speed it up, `&onboarding=0` to skip the tour. Settings persist in `localStorage` there.
+Open `index.html?demo=1` straight from disk. It runs a scripted office with generic names: ten agents in four rooms, a boss queue, boss visits, new sessions joining and the secretary flow. Add `&chaos=0..3` for how much the critters fidget, chat and doze (default 1, 0 turns the layer off, 3 is lively), `&night=1` for dimmed lights, `&hud=0` to hide the header, `&speed=2` to speed it up, `&onboarding=0` to skip the tour. Settings persist in `localStorage` there.
 
 ## Run options
 
@@ -157,6 +157,7 @@ For each transcript in `~/.claude/projects/<slug>/<uuid>.jsonl` modified in the 
 - `building.js`: state, layout, floors, walls, labels, static layers and the floor animation.
 - `actors.js`: the task system, walking, elevator, trips, boss visits, focus, queue and join or leave.
 - `render.js`: per-frame drawing of agents, bubbles, the elevator cab and effects.
+- `behavior.js`: the small social layer: personality, boredom, the rules table (contagion, chat, fidget, sleep spreads, line shuffle) and the `?chaos=` level.
 - `data.js`: applying server state, polling, settings load and save.
 - `demo.js`: the scripted demo.
 - `ui.js`: settings panel, hit buttons, drag and keyboard.

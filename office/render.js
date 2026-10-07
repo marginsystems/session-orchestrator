@@ -20,7 +20,7 @@ const drawScreen = function (x, fy, a, t) {
   } else if (a.state === 'waiting' && seated) {
     ctx.fillStyle = sc[1]; ctx.fillRect(sx + 1, sy, 6, 1); ctx.fillRect(sx + 1, sy + 2, 4, 1);
     if (Math.floor(t * 1.5) % 2) { ctx.fillStyle = sc[0]; ctx.fillRect(sx + 1, sy + 5, 2, 1); }
-  } else if (a.state === 'idle' && !a.sleepy) {
+  } else if (a.state === 'idle' && !a.sleepy && !napping(a)) {
     ctx.fillStyle = '#333c57'; ctx.fillRect(sx + 1, sy + 1, 5, 1);
     if (Math.floor(t) % 2) { ctx.fillStyle = sc[1]; ctx.fillRect(sx + 1, sy + 3, 1, 1); }
     const bx = Math.floor((t * 4 + a.seed) % 14);
@@ -42,7 +42,7 @@ const seatedPose = function (a, t) {
   const blink = ((t * 1000 + a.seed * 37) % 3600) < 160;
   if (a.state === 'working') { o.face = blink ? 'blink' : 'focus'; o.hdy = Math.floor(t * 4) % 2; }
   else if (a.state === 'waiting') { o.face = 'wait'; o.hdy = Math.floor(t * 1.5) % 2; }
-  else if (a.sleepy) { o.face = 'sleep'; o.sleeping = true; o.hdx = 4; o.hdy = 3 + (Math.floor(t * 0.8) % 2); }
+  else if (a.sleepy || napping(a)) { o.face = 'sleep'; o.sleeping = true; o.hdx = 4; o.hdy = 3 + (Math.floor(t * 0.8) % 2); }
   else {
     const ia = idleAct(a, t);
     o.face = blink ? 'blink' : 'neutral'; o.hdy = Math.floor(t * 0.9) % 2;
@@ -82,7 +82,7 @@ const drawAgent = function (a, t) {
 
 const drawAgentBody = function (a, t) {
   const x = Math.round(a.x), fy = yOf(a), st = a.st;
-  if (a.q && a.fr === BOSS && !a.walking && !a.inCab) { drawWaiter(a, t); return; }
+  if (a.q && a.fr === BOSS && !a.walking && !a.inCab) { drawWaiter(a, t, BH.moods.get(a.id)); return; }
   if (a.sit > 0.5) { drawSeated(a, t, x, fy, st, seatedPose(a, t)); return; }
   ctx.save();
   ctx.globalAlpha = 0.25 * a.alpha; ctx.fillStyle = '#000'; ctx.fillRect(x - 5, fy, 10, 1); ctx.globalAlpha = a.alpha;
@@ -175,7 +175,7 @@ const drawGuests = function (t) {
     if (id !== null) return;
     let g = guestStyles.get(k);
     if (!g) { g = { st: styleFor('guest' + k), seed: hash('guest' + k) }; guestStyles.set(k, g); }
-    drawWaiter({ x: lineX(k), st: g.st, seed: g.seed }, t);
+    drawWaiter({ x: lineX(k), st: g.st, seed: g.seed }, t, BH.moods.get('g' + k));
   });
 };
 
@@ -250,14 +250,15 @@ const drawSecretary = function (t) {
   if (waving) drawBubble({ x: x + 6, fr: BOSS, inCab: false, bubble: { text: 'NEXT!', t0: SEC.t0 } });
 };
 
-const drawWaiter = function (a, t) {
-  const x = Math.round(a.x), fy = footY(fIdx(BOSS)), st = a.st;
+const drawWaiter = function (a, t, m) {
+  const x = Math.round(a.x), fy = footY(fIdx(BOSS)), st = a.st, w = waiterPose(m);
   ctx.save();
-  ctx.translate(x, 0); ctx.scale(-1, 1);
+  ctx.translate(x, 0); ctx.scale(w.dir, 1);
   const blink = ((t * 1000 + a.seed * 37) % 3600) < 160;
-  const y = fy - 19 + (Math.floor(t * 1.2 + a.seed) % 2 ? 1 : 0);
+  const y = fy - 19 + (Math.floor(t * 1.2 + a.seed) % 2 ? 1 : 0) - Math.round(w.hop);
+  if (w.arms) ctx.drawImage(armsUpCv(st), -7, y + 1);
   ctx.drawImage(standBodyCv(st, 'C'), -7, y + 11);
-  ctx.drawImage(headCv(st, blink ? 'blink' : 'wait', 0), -7, y);
+  ctx.drawImage(headCv(st, w.face || (blink ? 'blink' : 'wait'), 0), -7, y);
   ctx.restore();
   ctx.fillStyle = '#566c86'; ctx.fillRect(x - 5, fy - 5, 10, 2); ctx.fillStyle = '#94b0c2'; ctx.fillRect(x - 5, fy - 5, 10, 1);
 };
@@ -330,7 +331,7 @@ const draw = function (t) {
     if (!a.away) {
       const fy = footY(fIdx(a.fr));
       if (a.state === 'waiting' && a.sit > 0.99 && !a.bubble) thought(t, x, fy);
-      if (a.sleepy && a.state === 'idle' && a.sit > 0.99) zees(t, x, fy);
+      if ((a.sleepy || napping(a)) && a.state === 'idle' && a.sit > 0.99) zees(t, x, fy);
       if (a.react > 0 && S.t - a.react < 1.1 && a.sit > 0.99) bang(x + 1, fy - 33);
     } else if (a.react > 0 && S.t - a.react < 1.1) bang(x, yOf(a) - 24);
   }
@@ -339,5 +340,6 @@ const draw = function (t) {
   for (const r of tourRects()) ants(ctx, r, t);
   if (HUD) drawGear();
   for (const a of [...all, B]) if (a.bubble) drawBubble(a);
+  drawBehaviorBubbles();
   if (S.skyCheck !== Math.floor(t / 5)) { S.skyCheck = Math.floor(t / 5); if (skyMode() !== S.sky) drawStatic(); }
 };

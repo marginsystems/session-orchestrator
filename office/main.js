@@ -30,6 +30,7 @@ window.addEventListener('resize', () => { clearTimeout(rz); rz = setTimeout(layo
 spawn(elevatorProc());
 spawn(queueProc());
 spawn(bossProc());
+spawn(behaviorProc());
 measure();
 if (DEMO) { S.set = cleanSet(lsRead()); S.setReady = true; startDemo(); }
 else if (location.protocol.startsWith('http')) loadSettings().then(() => { poll(); setInterval(poll, 2500); });
@@ -68,4 +69,5 @@ window['__office'] = {
   particles: () => S.particles.length,
   ui: () => ({ settings: UI.settings, tour: UI.tour ? { step: UI.tour.step, shown: UI.tour.shown, len: UI.tour.text.length, text: UI.tour.text, did: UI.tour.did } : null, U: { ...U }, dialog: UI.dialog, strip: UI.strip, geo: UI.geo ? { x: UI.geo.x, y: UI.geo.y, w: UI.geo.w, h: UI.geo.h, rows: UI.geo.rows, n: UI.geo.n } : null, dpr: window.devicePixelRatio || 1, canvas: (() => { const r = uc.getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width, h: r.height }; })() }),
   sky: () => S.sky,
+  behavior: () => behaviorSnapshot(),
 };
