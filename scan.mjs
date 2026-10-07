@@ -179,12 +179,14 @@ function sidebarSessions(desktop) {
 
 function desktopSessions() {
   const out = new Map();
+  out.available = false;
   let level1;
   try {
     level1 = readdirSync(DESKTOP_SESSIONS);
   } catch {
     return out;
   }
+  out.available = true;
   for (const a of level1) {
     let level2;
     try {
@@ -301,7 +303,7 @@ function readFocus(now, desktop) {
 }
 
 const sessionGone = (sid, desktop) => {
-  if (typeof sid !== 'string' || !sid || !desktop.size) return false;
+  if (typeof sid !== 'string' || !sid || !desktop.available) return false;
   const rec = sid.startsWith('local_') ? desktop.get(sid) : [...desktop.values()].find((r) => r.cli === sid);
   return sid.startsWith('local_') ? !rec || rec.archived === true : Boolean(rec && rec.archived);
 };
