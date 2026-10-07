@@ -38,6 +38,8 @@ Keep PRs small and single-purpose.
 
 Run `npm run check` (lint, typecheck, unit tests).
 
+While iterating run the quick tier (`TIER=quick PW_DIR=<dir> node test/check.mjs`, about 20 seconds); run the full suite before a PR.
+
 For UI changes also run the Playwright suite and look at the screenshots at 1280x720 and 390x844:
 
 ```

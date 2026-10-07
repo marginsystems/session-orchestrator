@@ -8,6 +8,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { request } from 'node:http';
 import { createServer } from 'node:net';
 import { inflateSync } from 'node:zlib';
+import { AsyncLocalStorage } from 'node:async_hooks';
 
 const require = createRequire(process.env.PW_DIR ? join(process.env.PW_DIR, 'x.js') : import.meta.url);
 const { chromium } = require('playwright');
@@ -15,10 +16,18 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const SHOTS = process.env.SHOTS || join(tmpdir(), 'session-orchestrator-shots');
 mkdirSync(SHOTS, { recursive: true });
 const { isHumanPrompt } = await import(join(ROOT, 'lib', 'prompts.mjs'));
-const ONLY = process.env.ONLY ? process.env.ONLY.split(',') : null;
+const QUICK = process.env.TIER === 'quick' || (process.env.ONLY || '').split(',').includes('quick');
+const ONLY = process.env.ONLY && !QUICK ? process.env.ONLY.split(',') : null;
 const want = (n) => !ONLY || ONLY.includes(n);
+const JOBS = Math.max(1, Math.floor(Number(process.env.JOBS) || 6));
+const jobs = new AsyncLocalStorage();
+const say = (...a) => {
+  const job = jobs.getStore();
+  if (job) job.lines.push(a.join(' '));
+  else console.log(...a);
+};
 const fails = [];
-const check = (ok, msg) => { if (!ok) { fails.push(msg); console.log('FAIL', msg); } };
+const check = (ok, msg) => { if (!ok) { fails.push(msg); say('FAIL', msg); } };
 const hit = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const sha = (s) => createHash('sha1').update(s).digest('hex');
@@ -26,7 +35,8 @@ const agentId = (uuid) => 'a' + sha(uuid).slice(0, 8);
 const demoUrl = (q = '') => `file://${ROOT}/index.html?demo=1&onboarding=0&${q}`;
 
 let browser;
-const getBrowser = async () => browser || (browser = await chromium.launch());
+let browserLaunch;
+const getBrowser = () => browser || (browserLaunch ||= chromium.launch().then((b) => (browser = b)));
 
 function decodePng(buf) {
   let p = 8, w = 0, h = 0, ct = 0;
@@ -52,15 +62,48 @@ function decodePng(buf) {
   return { w, h, bpp, data: out };
 }
 
-async function open(vw, vh, dpr, url, wait = 700) {
+const clocks = new WeakMap();
+const adv = async (page, seconds) => {
+  clocks.set(page, (clocks.get(page) || 0) + seconds);
+  await page.evaluate((s) => window.__office.advance(s), seconds);
+  if (page.url().startsWith('http')) await sleep(20);
+};
+const nap = (page, ms) => adv(page, ms / 1000);
+const vnow = (page) => (clocks.get(page) || 0) * 1000;
+
+async function open(vw, vh, dpr, url, wait = 700, realTime = false) {
   const ctx = await (await getBrowser()).newContext({ viewport: { width: vw, height: vh }, deviceScaleFactor: dpr });
+  jobs.getStore()?.contexts.add(ctx);
+  if (!realTime) await ctx.addInitScript(() => { window['__officeHold'] = true; });
   const page = await ctx.newPage();
   const errors = [];
   page.on('console', (m) => { if (m.type() === 'error' || m.type() === 'warning') errors.push(m.text()); });
   page.on('pageerror', (e) => errors.push(String(e)));
   await page.goto(url);
-  await sleep(wait);
+  if (realTime) await sleep(wait);
+  else {
+    if (url.startsWith('http')) await page.waitForFunction(() => window.__office.rooms().length > 0);
+    await nap(page, wait);
+  }
   return { ctx, page, errors };
+}
+
+async function settle(page, pred, arg, maxSeconds = 8, realMs = 25) {
+  for (let t = 0; t < maxSeconds; t += 0.1) {
+    if (await page.evaluate(pred, arg)) return true;
+    await sleep(realMs);
+    await adv(page, 0.1);
+  }
+  return page.evaluate(pred, arg);
+}
+
+async function realUntil(fn, ms = 6000) {
+  const end = Date.now() + ms;
+  for (;;) {
+    const v = await fn();
+    if (v || Date.now() > end) return v;
+    await sleep(50);
+  }
 }
 
 const ev = (page, fn, arg) => page.evaluate(fn, arg);
@@ -130,7 +173,7 @@ async function tripCheck(page, tag) {
   await page.evaluate(([a, b]) => window.__office.trip(a, b, "PR's up"), [info.A, info.B]);
   let sawBubble = false, usedElevator = false, arrived = false, returned = false;
   for (let i = 0; i < 500; i++) {
-    await sleep(100);
+    await nap(page, 100);
     const s = await page.evaluate((a) => { const o = window.__office; return { A: o.agents().find((x) => x.id === a), w: o.world(), labels: o.labels() }; }, info.A);
     const A = s.A;
     if (A.inCab) usedElevator = true;
@@ -160,7 +203,7 @@ async function visitorCheck(page, tag) {
   check(await page.evaluate((b) => window.__office.trip('nobody', b, 'need eyes'), B), `${tag} visitor trip refused`);
   let arrived = false, gone = false, started = false;
   for (let i = 0; i < 600; i++) {
-    await sleep(100);
+    await nap(page, 100);
     const s = await page.evaluate(() => { const o = window.__office; return { v: o.agents().find((a) => a.visitor), w: o.world() }; });
     if (s.v) {
       started = true;
@@ -183,7 +226,7 @@ async function focusCheck(page, tag) {
   await page.evaluate((id) => window.__office.focus(id, 'test' + Math.random()), info.id);
   let arrived = false, usedElevator = false;
   for (let i = 0; i < 700 && !arrived; i++) {
-    await sleep(100);
+    await nap(page, 100);
     const s = await page.evaluate((id) => ({ a: window.__office.agents().find((x) => x.id === id), w: window.__office.world() }), info.id);
     if (!s.a) continue;
     if (s.a.inCab) usedElevator = true;
@@ -197,13 +240,13 @@ async function focusCheck(page, tag) {
   }
   check(arrived, `${tag} focus agent never reached boss office`);
   check(usedElevator, `${tag} focus agent skipped the elevator`);
-  await sleep(2500);
+  await nap(page, 2500);
   const still = await page.evaluate((id) => window.__office.agents().find((x) => x.id === id), info.id);
   check(still && still.fr === '__boss' && still.away, `${tag} focus agent left the boss office before focus changed`);
   await page.evaluate(() => window.__office.clearFocus());
   let back = false;
   for (let i = 0; i < 700; i++) {
-    await sleep(100);
+    await nap(page, 100);
     const a = await page.evaluate((id) => window.__office.agents().find((x) => x.id === id), info.id);
     if (a && !a.away) { back = true; check(Math.abs(a.x - dk.x) < 0.01 && Math.abs(a.y - dk.y) < 0.01 && a.sit === 1, `${tag} focus agent not at desk after return`); break; }
   }
@@ -213,7 +256,7 @@ async function focusCheck(page, tag) {
 async function queueSeatCheck(page, tag) {
   let q = null;
   for (let i = 0; i < 600; i++) {
-    await sleep(100);
+    await nap(page, 100);
     q = await page.evaluate(() => window.__office.queue());
     const ag = await page.evaluate(() => window.__office.agents());
     if (q.want.length >= 2 && q.want.every((id) => ag.find((a) => a.id === id && a.queued))) break;
@@ -234,7 +277,7 @@ async function queueSeatCheck(page, tag) {
 async function secretaryCheck(page, tag) {
   let q = null, id = null;
   for (let i = 0; i < 600; i++) {
-    await sleep(100);
+    await nap(page, 100);
     q = await page.evaluate(() => window.__office.queue());
     if (!q.want.length) continue;
     const a = await page.evaluate((w) => window.__office.agents().find((x) => x.id === w), q.want[0]);
@@ -245,7 +288,7 @@ async function secretaryCheck(page, tag) {
   await page.evaluate((i) => window.__office.focus(i, 'sec' + Math.random()), id);
   let waved = false, entered = false;
   for (let i = 0; i < 400; i++) {
-    await sleep(100);
+    await nap(page, 100);
     const s = await page.evaluate((i2) => ({ sec: window.__office.secretary(), a: window.__office.agents().find((x) => x.id === i2), b: window.__office.boss() }), id);
     if (s.sec.waving) waved = true;
     if (waved && s.a && s.a.fr === '__boss' && s.a.x < q.door) entered = true;
@@ -254,7 +297,7 @@ async function secretaryCheck(page, tag) {
   check(waved, `${tag} secretary did not wave the front agent through`);
   check(entered, `${tag} front agent did not walk into the Boss Office`);
   await page.evaluate(() => window.__office.clearFocus());
-  await sleep(1500);
+  await nap(page, 1500);
 }
 
 async function bossRouteCheck(page, tag) {
@@ -274,14 +317,14 @@ async function bossRouteCheck(page, tag) {
     let stood = false, cab = false, atDesk = false, returned = false, bubbleMs = 0, lastT = 0;
     bubbles = 0;
     for (let i = 0; i < 1500; i++) {
-      await sleep(80);
+      await nap(page, 80);
       const s = await page.evaluate((id) => ({ b: window.__office.bossActor(), a: window.__office.agents().find((x) => x.id === id), w: window.__office.world() }), info.id);
       if (s.b.away && s.b.sit === 0) stood = true;
       if (s.b.inCab) cab = true;
       if (s.b.away && s.b.fr === info.desk.room && Math.abs(s.b.x - (info.desk.x - 17)) < 0.6 && s.b.bubble) {
         atDesk = true;
-        if (!lastT) lastT = Date.now();
-        bubbleMs = Date.now() - lastT;
+        if (!lastT) lastT = vnow(page);
+        bubbleMs = vnow(page) - lastT;
         check(s.b.bubble.x >= 0 && s.b.bubble.y >= 0 && s.b.bubble.x + s.b.bubble.w <= s.w.w, `${tag} boss bubble outside canvas`);
         if (s.a.bubble) { bubbles++; check(!hit(s.b.bubble, s.a.bubble), `${tag} boss and agent bubbles overlap`); }
       }
@@ -319,7 +362,7 @@ async function joinCheck(page, tag, newProject) {
   check(joined.pendingDesk, `${tag} join never showed the pending desk`);
   let cab = false, seated = false, sawAnim = false;
   for (let i = 0; i < 900; i++) {
-    await sleep(100);
+    await nap(page, 100);
     const s = await page.evaluate((i2) => { const o = window.__office; return { a: o.agents().find((x) => x.id === i2), desks: o.desks(), anim: o.animating() }; }, id);
     if (s.anim) sawAnim = true;
     if (!s.a) continue;
@@ -371,7 +414,7 @@ async function dragRow(page, from, to) {
   await page.mouse.down();
   await page.mouse.move(a.x + 24, a.y + a.h / 2 + (b.y - a.y) / 2, { steps: 4 });
   await page.mouse.move(a.x + 24, b.y + b.h / 2 + (to > from ? 2 : -2), { steps: 6 });
-  await sleep(120);
+  await nap(page, 120);
   await page.mouse.up();
 }
 
@@ -380,12 +423,12 @@ async function tourCheck(page, tag, shot) {
   check(!!u.tour && u.tour.step === 0, `${tag} tour not shown on first run`);
   const seen = [];
   for (let step = 0; step < 6; step++) {
-    await sleep(250);
+    await nap(page, 250);
     u = await boxChecks(page, tag, 'tour step ' + step);
     seen.push(u.tour && u.tour.step);
     check(u.tour && u.tour.step === step, `${tag} expected tour step ${step}, got ${u.tour && u.tour.step}`);
     const t0 = u.tour.shown;
-    await sleep(400);
+    await nap(page, 400);
     const t1 = (await uiState(page)).tour.shown;
     check(t1 > t0 || t0 === u.tour.len, `${tag} typewriter not advancing on step ${step}`);
     if (shot && step === shot.step) await page.screenshot({ path: join(SHOTS, `${tag}-${shot.name}.png`) });
@@ -395,7 +438,7 @@ async function tourCheck(page, tag, shot) {
       const before = await page.evaluate(() => window.__office.rooms().map((r) => r.id));
       if (before.length > 1) {
         await dragRow(page, 0, 1);
-        await sleep(300);
+        await nap(page, 300);
         const after = await page.evaluate(() => window.__office.rooms().map((r) => r.id));
         check(after.join() !== before.join() && after[1] === before[0], `${tag} tour drag did not reorder`);
         const u3 = await uiState(page);
@@ -407,7 +450,7 @@ async function tourCheck(page, tag, shot) {
     if (step === 4) {
       let walked = false;
       for (let i = 0; i < 400 && !walked; i++) {
-        await sleep(100);
+        await nap(page, 100);
         const st = await ev(page, () => ({ ag: window.__office.agents(), door: window.__office.queue().door }));
         if (st.ag.some((a) => a.visitor && a.fr === '__boss' && a.x < st.door)) walked = true;
       }
@@ -417,12 +460,12 @@ async function tourCheck(page, tag, shot) {
       const next = page.locator('[data-id="next"]');
       if (!(await next.count())) break;
       await next.click();
-      await sleep(150);
+      await nap(page, 150);
       const cur = await uiState(page);
       if (!cur.tour || cur.tour.step !== step) break;
     }
   }
-  await sleep(300);
+  await nap(page, 300);
   u = await uiState(page);
   check(!u.tour, `${tag} tour still open after finishing`);
   check((await ev(page, () => window.__office.particles())) > 0, `${tag} no confetti on finish`);
@@ -515,12 +558,21 @@ function writeSession(dir, project, ageSec) {
 
 const spawned = [];
 process.on('exit', () => { for (const c of spawned) c.kill(); });
-function startServer(home, port, extra = []) {
+const portReservations = new Map();
+async function startServer(home, port, extra = []) {
+  const reservation = portReservations.get(port);
+  if (reservation) {
+    portReservations.delete(port);
+    await new Promise((resolve, reject) => reservation.close((error) => error ? reject(error) : resolve()));
+  }
   const child = spawn('node', [join(ROOT, 'scan.mjs'), '--port', String(port), ...extra], { stdio: 'ignore', env: { ...process.env, HOME: home } });
   spawned.push(child);
+  jobs.getStore()?.servers.add(child);
   return child;
 }
 
+const readJson = (file) => { try { return JSON.parse(readFileSync(file, 'utf8')); } catch { return {}; } };
+const serverReady = (port) => realUntil(async () => (await httpReq(port, { path: '/state.json' })).status === 200, 15000);
 const stateOf = async (port) => JSON.parse((await httpReq(port, { path: '/state.json' })).text);
 async function waitState(port, pred, ms = 9000) {
   const end = Date.now() + ms;
@@ -554,27 +606,27 @@ if (want('unit')) {
     ['garbage', null, false],
   ];
   for (const [name, entry, expected] of cases) check(isHumanPrompt(entry) === expected, `unit: ${name} expected ${expected}`);
-  console.log('unit ok', cases.length, 'cases');
+  say('unit ok', cases.length, 'cases');
 }
 
 let fixtureHome;
 let fixture;
-const freePort = () => new Promise((resolve, reject) => {
+const freePort = (port = 0) => new Promise((resolve, reject) => {
   const srv = createServer();
   srv.once('error', reject);
-  srv.listen(0, '127.0.0.1', () => { const { port } = srv.address(); srv.close(() => resolve(port)); });
+  srv.listen(port, '127.0.0.1', () => { const { port: reservedPort } = srv.address(); portReservations.set(reservedPort, srv); resolve(reservedPort); });
 });
 const basePort = Number(process.env.SO_TEST_PORT) || 0;
-const SPORT = basePort || await freePort();
-const LPORT = basePort ? basePort + 1 : await freePort();
-const CPORT = basePort ? basePort + 2 : await freePort();
+const SPORT = await freePort(basePort);
+const LPORT = await freePort(basePort ? basePort + 1 : 0);
+const CPORT = await freePort(basePort ? basePort + 2 : 0);
 
-if (want('server')) {
+const serverJob = async () => {
   fixtureHome = mkdtempSync(join(tmpdir(), 'so-home-'));
   fixture = makeFixture(fixtureHome);
   const ids = Object.fromEntries(fixture.map((f) => [f.project + f.ageSec, f.id]));
-  let server = startServer(fixtureHome, SPORT);
-  await sleep(1500);
+  let server = await startServer(fixtureHome, SPORT);
+  await serverReady(SPORT);
   let s = await stateOf(SPORT);
   check(s.rooms.map((r) => r.label).join() === 'atlas,beacon,citadel,delta', `server default room order ${s.rooms.map((r) => r.label)}`);
   check(!s.events.some((e) => e.kind === 'join'), 'server emitted join events for sessions that existed at startup');
@@ -631,9 +683,9 @@ if (want('server')) {
   check(still.speed === 2, `a rejected post changed settings (speed ${still.speed})`);
 
   server.kill();
-  await sleep(500);
-  server = startServer(fixtureHome, SPORT);
-  await sleep(1500);
+  await realUntil(async () => (await httpReq(SPORT, { path: '/state.json' })).status === 0);
+  server = await startServer(fixtureHome, SPORT);
+  await serverReady(SPORT);
   const re = JSON.parse((await httpReq(SPORT, { path: '/settings' })).text);
   check(re.speed === 2 && re.sound === true && re.order.length === 2 && re.onboardedAt === '2026-10-06T00:00:00.000Z', 'settings did not survive a restart');
   s = await stateOf(SPORT);
@@ -675,18 +727,18 @@ if (want('server')) {
   writeFileSync(join(focusDir, 'focus.json'), JSON.stringify({ sessionId: fixture.find((f) => f.project === 'beacon' && f.ageSec === 200).uuid, at: nowIso() }));
   s = await waitState(SPORT, (st) => st.focus && st.focus.agentId);
   check(s.focus && s.focus.agentId === ids.beacon200, 'focus.json not mapped to the agent');
-  console.log('server ok');
+  say('server ok');
   server.kill();
-  await sleep(300);
-}
 
-if (want('server')) {
+};
+
+const crowdJob = async () => {
   const home = mkdtempSync(join(tmpdir(), 'so-crowd-'));
   const { sessions, oldest } = makeCrowd(home);
   const focusFile = join(home, '.session-orchestrator', 'focus.json');
   mkdirSync(join(home, '.session-orchestrator'), { recursive: true });
-  const crowdServer = startServer(home, CPORT);
-  await sleep(1500);
+  const crowdServer = await startServer(home, CPORT);
+  await serverReady(CPORT);
   let s = await stateOf(CPORT);
   check(s.agents.length === 30, `crowd: expected the 30 session cap, got ${s.agents.length}`);
   check(!s.agents.some((a) => a.id === oldest.id), 'crowd: the oldest session was picked without focus');
@@ -707,26 +759,26 @@ if (want('server')) {
   s = await waitState(CPORT, (st) => st.focus && st.focus.agentId === 'visitor');
   check(s.focus && s.focus.agentId === 'visitor', 'crowd: unknown uuid did not stay visitor');
   check(sessions.length > 30, 'crowd: fixture too small');
-  console.log('crowd ok');
+  say('crowd ok');
   crowdServer.kill();
   rmSync(home, { recursive: true, force: true });
-  await sleep(300);
-}
 
-if (want('live')) {
+};
+
+const liveJob = async () => {
   const home = mkdtempSync(join(tmpdir(), 'so-live-'));
   const fx = makeFixture(home);
   const ids = Object.fromEntries(fx.map((f) => [f.project + f.ageSec, f.id]));
-  const server = startServer(home, LPORT);
-  await sleep(1500);
+  const server = await startServer(home, LPORT);
+  await serverReady(LPORT);
   const base = `http://127.0.0.1:${LPORT}/`;
   const settingsFile = join(home, '.session-orchestrator', 'settings.json');
   {
     const { ctx, page, errors } = await open(1280, 720, 1, base, 1500);
     check(await ev(page, () => window.__office.server()), 'live page did not detect the server');
     await tourCheck(page, 'live-tour', { step: 4, name: 'queue' });
-    await sleep(800);
-    check(existsSync(settingsFile) && !!JSON.parse(readFileSync(settingsFile, 'utf8')).onboardedAt, 'onboardedAt not persisted by the server');
+    const persisted = await realUntil(() => existsSync(settingsFile) && !!readJson(settingsFile).onboardedAt);
+    check(persisted, 'onboardedAt not persisted by the server');
     check(errors.length === 0, 'live tour console errors ' + errors.join('|'));
     await ctx.close();
   }
@@ -737,36 +789,36 @@ if (want('live')) {
     check(labels.join() === 'beacon,atlas,citadel,delta', `live floors show ${labels} (the tour reordered the first two)`);
     const plaques = await ev(page, () => window.__office.labels().map((l) => l.id));
     check(plaques.length > 0, 'no plaques');
-    await sleep(500);
+    await nap(page, 500);
     await page.click('#gear');
-    await sleep(400);
+    await nap(page, 400);
     const u = await boxChecks(page, 'live', 'settings');
     check(u.settings && u.geo && u.geo.n === 4, 'settings panel did not open with four floors');
     const downs = page.locator('[data-kind="down"]');
     await downs.first().click();
-    await sleep(250);
+    await nap(page, 250);
     check(await ev(page, () => window.__office.animating()), 'floors did not start re-stacking after a priority change');
     const mid = await ev(page, () => window.__office.floors().filter((f) => f.id !== '__boss' && f.id !== '__lobby').map((f) => ({ top: f.top, y: f.y })));
     check(mid.some((f) => Math.abs(f.y - f.top) > 0.5), 'no floor was between positions during the re-stack');
-    await sleep(1400);
+    await nap(page, 1400);
     check(!(await ev(page, () => window.__office.animating())), 're-stack animation never finished');
     const after = await ev(page, () => window.__office.rooms().map((r) => r.label));
     check(after.join() === 'atlas,beacon,citadel,delta', `priority change gave ${after}`);
     const floorsNow = await ev(page, () => window.__office.floors());
     check(floorsNow.every((f) => Math.abs(f.y - f.top) < 0.01), 'floors not settled at their slots');
     check(floorsNow.filter((f) => f.id[0] === 'r').map((f) => f.id).join() === (await ev(page, () => window.__office.rooms().map((r) => r.id))).join(), 'floor stacking differs from priority order');
-    await sleep(600);
-    const served = JSON.parse((await httpReq(LPORT, { path: '/state.json' })).text);
+    await realUntil(async () => (await stateOf(LPORT)).rooms.map((r) => r.label).join() === 'atlas,beacon,citadel,delta');
+    const served = await stateOf(LPORT);
     check(served.rooms.map((r) => r.label).join() === 'atlas,beacon,citadel,delta', 'server state does not reflect the UI priority change');
     const disk = JSON.parse(readFileSync(settingsFile, 'utf8'));
     check(disk.order.join() === served.rooms.map((r) => r.id).join(), 'settings.json order does not match floors');
     await page.locator('[data-id="tg:anonymize"]').click();
-    await sleep(3200);
+    await settle(page, () => window.__office.rooms().map((r) => r.label).join() === 'Room A,Room B,Room C,Room D');
     const anon = await ev(page, () => window.__office.rooms().map((r) => r.label));
     check(anon.join() === 'Room A,Room B,Room C,Room D', `anonymize toggle gave ${anon}`);
     await page.locator('[data-id="tg:anonymize"]').click();
     await page.locator('[data-id="tg:titles"]').click();
-    await sleep(3200);
+    await settle(page, () => window.__office.agents().filter((a) => a.title === 'Tidy the parser').length === 1);
     check((await ev(page, () => window.__office.agents().filter((a) => a.title === 'Tidy the parser').length)) === 1, 'titles toggle did not show the session title tag');
     await page.screenshot({ path: join(SHOTS, 'live-settings.png') });
     await page.locator('[data-id="tg:titles"]').click();
@@ -787,9 +839,11 @@ if (want('live')) {
     await queueSeatCheck(page, 'live');
     await page.screenshot({ path: join(SHOTS, 'live-queue.png') });
     writeFileSync(join(home, '.session-orchestrator', 'focus.json'), JSON.stringify({ sessionId: fx.find((f) => f.id === q.want[0]).uuid, at: new Date().toISOString() }));
+    await realUntil(async () => ((await stateOf(LPORT)).focus || {}).agentId === q.want[0]);
+    await ev(page, () => window.__office.poll());
     let entered = false, waved = false;
     for (let i = 0; i < 300 && !entered; i++) {
-      await sleep(100);
+      await nap(page, 100);
       const s = await ev(page, () => ({ ag: window.__office.agents(), q: window.__office.queue(), sec: window.__office.secretary() }));
       if (s.sec.waving) waved = true;
       const a = s.ag.find((x) => x.id === q.want[0]);
@@ -797,7 +851,7 @@ if (want('live')) {
     }
     check(waved, 'live: secretary did not wave when focus.json named the front agent');
     check(entered, 'live: focused agent did not step from the queue into the Boss Office');
-    await sleep(1500);
+    await nap(page, 1500);
     const after = await ev(page, () => window.__office.queue());
     check(!after.want.includes(q.want[0]) && after.want[0] === q.want[1], 'live: the queue did not shuffle forward after the front agent went in');
     const forward = await ev(page, () => window.__office.agents().find((a) => a.id === window.__office.queue().want[0]));
@@ -808,10 +862,11 @@ if (want('live')) {
   {
     const seated = fx.find((f) => f.project === 'atlas' && f.ageSec === 3600);
     writeFileSync(join(home, '.session-orchestrator', 'focus.json'), JSON.stringify({ sessionId: seated.uuid, at: new Date().toISOString() }));
+    await realUntil(async () => ((await stateOf(LPORT)).focus || {}).agentId === seated.id);
     const { ctx, page, errors } = await open(1280, 720, 1, base, 800);
     let atSecretary = false, atBoss = false;
     for (let i = 0; i < 400 && !atBoss; i++) {
-      await sleep(100);
+      await nap(page, 100);
       const s = await ev(page, (id) => ({ a: window.__office.agents().find((x) => x.id === id) || null, sec: window.__office.secretary(), boss: window.__office.boss() }), seated.id);
       if (!s.a) continue;
       if (s.a.fr === '__boss' && Math.abs(s.a.x - s.sec.x) < 3 && s.sec.waving) atSecretary = true;
@@ -848,13 +903,13 @@ if (want('live')) {
   }
   server.kill();
   rmSync(home, { recursive: true, force: true });
-  console.log('live ok');
-}
+  say('live ok');
+};
 
 async function queueWait(page) {
   let q = null;
   for (let i = 0; i < 200; i++) {
-    await sleep(100);
+    await nap(page, 100);
     q = await ev(page, () => window.__office.queue());
     if (q.want.length) break;
   }
@@ -881,7 +936,7 @@ async function runDemo(vw, vh, dpr, tag) {
   await page.screenshot({ path: join(SHOTS, `${tag}-joined.png`) });
   let moving = 0;
   for (let i = 0; i < 60; i++) {
-    await sleep(250);
+    await nap(page, 250);
     const s = await page.evaluate(() => { const o = window.__office; return { ag: o.agents(), fl: o.floors(), el: o.elevator(), w: o.world(), labels: o.labels() }; });
     moving = Math.max(moving, s.ag.filter((a) => a.away).length);
     for (const a of s.ag) {
@@ -897,7 +952,7 @@ async function runDemo(vw, vh, dpr, tag) {
   await (await page.$('#cv')).screenshot({ path: join(SHOTS, `${tag}-1.png`) });
   const e2 = errors.filter(Boolean);
   check(e2.length === 0, `${tag} console errors: ${e2.join(' | ')}`);
-  console.log(tag, 'ok; px', d.px, 'world', d.w.w + 'x' + d.w.h, 'max away', moving);
+  say(tag, 'ok; px', d.px, 'world', d.w.w + 'x' + d.w.h, 'max away', moving);
   await ctx.close();
 }
 
@@ -908,7 +963,7 @@ async function runUi(vw, vh, dpr, tag) {
     const ls = await ev(page, () => window.__office.settings());
     check(!!ls.onboardedAt, `${tag} onboarding not saved to localStorage`);
     await page.reload();
-    await sleep(1200);
+    await nap(page, 1200);
     check(!(await uiState(page)).tour, `${tag} onboarding shown again after the first run`);
     const saved = await ev(page, () => window.__office.rooms().map((r) => r.id));
     check(saved[0] !== 'dashboard', `${tag} floor priority not restored from localStorage: ${saved}`);
@@ -919,10 +974,10 @@ async function runUi(vw, vh, dpr, tag) {
     const { ctx, page } = await open(vw, vh, dpr, `file://${ROOT}/index.html?demo=1&seed=3&speed=3&sim=0&onboarding=1`, 1200);
     check(!!(await uiState(page)).tour, `${tag} ?onboarding=1 did not force the tour`);
     await page.locator('[data-id="skip"]').click();
-    await sleep(300);
+    await nap(page, 300);
     check(!(await uiState(page)).tour, `${tag} skip did not close the tour`);
     await page.reload();
-    await sleep(1200);
+    await nap(page, 1200);
     check(!!(await uiState(page)).tour, `${tag} ?onboarding=1 not forced again after skipping`);
     await ctx.close();
   }
@@ -930,24 +985,24 @@ async function runUi(vw, vh, dpr, tag) {
     const { ctx, page, errors } = await open(vw, vh, dpr, demoUrl('seed=3&speed=3&sim=0&autofocus=0'), 1200);
     check(!(await uiState(page)).tour, `${tag} onboarding=0 still showed the tour`);
     await page.locator('#gear').click();
-    await sleep(300);
+    await nap(page, 300);
     const u = await boxChecks(page, tag, 'settings');
     check(u.settings && u.geo.n === 4, `${tag} settings did not list four floors`);
     await page.screenshot({ path: join(SHOTS, `${tag}-settings.png`) });
     const start = await ev(page, () => window.__office.rooms().map((r) => r.id));
     await page.locator('[data-kind="down"]').first().click();
-    await sleep(150);
+    await nap(page, 150);
     check(await ev(page, () => window.__office.animating()), `${tag} no re-stack animation`);
-    await sleep(1400);
+    await nap(page, 1400);
     let now = await ev(page, () => window.__office.rooms().map((r) => r.id));
     check(now[0] === start[1] && now[1] === start[0], `${tag} down button did not swap the first two floors`);
     await page.locator('[data-kind="row"]').nth(3).focus();
     await page.keyboard.press('ArrowUp');
-    await sleep(1400);
+    await nap(page, 1400);
     now = await ev(page, () => window.__office.rooms().map((r) => r.id));
     check(now[2] === start[3], `${tag} keyboard move failed: ${now}`);
     await dragRow(page, 2, 0);
-    await sleep(1500);
+    await nap(page, 1500);
     now = await ev(page, () => window.__office.rooms().map((r) => r.id));
     check(now[0] === start[3], `${tag} drag to the top failed: ${now}`);
     const floors = await ev(page, () => window.__office.floors().map((f) => f.id).filter((id) => id[0] !== '_'));
@@ -956,11 +1011,11 @@ async function runUi(vw, vh, dpr, tag) {
     check(stored.join() === now.join(), `${tag} settings order ${stored} != floors ${now}`);
     await boxChecks(page, tag, 'settings after reorder');
     await page.locator('[data-id="tg:anonymize"]').click();
-    await sleep(300);
+    await nap(page, 300);
     check((await ev(page, () => window.__office.rooms().map((r) => r.label))).join() === 'Room A,Room B,Room C,Room D', `${tag} demo anonymize failed`);
     await page.locator('[data-id="tg:anonymize"]').click();
     await page.locator('[data-id="tg:titles"]').click();
-    await sleep(300);
+    await nap(page, 300);
     check((await ev(page, () => window.__office.agents().filter((a) => a.title).length)) === 10, `${tag} demo titles not shown`);
     await page.locator('[data-id="tg:titles"]').click();
     await page.locator('[data-id="sp:2"]').click();
@@ -968,7 +1023,7 @@ async function runUi(vw, vh, dpr, tag) {
     const st = await ev(page, () => window.__office.settings());
     check(st.speed === 2 && st.sound === true, `${tag} speed/sound toggles not stored`);
     await page.locator('[data-id="reset"]').click();
-    await sleep(400);
+    await nap(page, 400);
     check(!!(await uiState(page)).tour && !(await ev(page, () => window.__office.settings().onboardedAt)), `${tag} reset onboarding did not restart the tour`);
     await page.locator('[data-id="skip"]').click();
     check(errors.length === 0, `${tag} settings console errors ${errors.join('|')}`);
@@ -981,14 +1036,14 @@ async function perf() {
     const { ctx, page, errors } = await open(1280, 720, 1, demoUrl('seed=4&speed=3&autofocus=1'));
     let moving = 0, atBoss = false, bossAway = false, sawVisit = false;
     for (let i = 0; i < 360; i++) {
-      await sleep(250);
+      await nap(page, 250);
       const s = await page.evaluate(() => ({ ag: window.__office.agents(), b: window.__office.bossActor() }));
       moving = Math.max(moving, s.ag.filter((a) => a.away && !a.settled).length + (s.b.away ? 1 : 0));
       if (s.ag.some((a) => a.fr === '__boss' && a.away && !a.inCab && !a.queued)) atBoss = true;
       if (s.b.away) bossAway = true;
       if (s.ag.some((a) => a.id.startsWith('dn_'))) sawVisit = true;
     }
-    console.log('demo max concurrent movers', moving);
+    say('demo max concurrent movers', moving);
     check(moving >= 2 && moving <= 4, `demo concurrent movers ${moving} outside 2..4`);
     check(atBoss, 'demo never summoned an agent to the boss office');
     check(bossAway, 'demo never sent the boss to a desk');
@@ -997,31 +1052,31 @@ async function perf() {
     await ctx.close();
   }
   {
-    const { ctx, page, errors } = await open(1280, 720, 1, demoUrl('seed=5'));
+    const { ctx, page, errors } = await open(1280, 720, 1, demoUrl('seed=5'), 700, true);
     const cdp = await ctx.newCDPSession(page);
     await cdp.send('Performance.enable');
     const m0 = (await cdp.send('Performance.getMetrics')).metrics;
     const get = (m, n) => m.find((x) => x.name === n).value;
     const f0 = await page.evaluate(() => window.__office.frames());
-    await sleep(8000);
+    await sleep(5000);
     const m1 = (await cdp.send('Performance.getMetrics')).metrics;
     const f1 = await page.evaluate(() => window.__office.frames());
-    const cpu = (get(m1, 'TaskDuration') - get(m0, 'TaskDuration')) / 8;
-    const fps = (f1 - f0) / 8;
-    console.log('cpu', (cpu * 100).toFixed(1) + '%', 'fps', fps.toFixed(1));
+    const cpu = (get(m1, 'TaskDuration') - get(m0, 'TaskDuration')) / 5;
+    const fps = (f1 - f0) / 5;
+    say('cpu', (cpu * 100).toFixed(1) + '%', 'fps', fps.toFixed(1));
     check(cpu < 0.2, `cpu too high ${cpu}`);
     check(fps <= 21 && fps >= 8, `fps out of range ${fps}`);
     await page.evaluate(() => { Object.defineProperty(document, 'hidden', { value: true, configurable: true }); document.dispatchEvent(new Event('visibilitychange')); });
     await sleep(300);
     const h0 = await page.evaluate(() => window.__office.frames());
-    await sleep(1500);
+    await sleep(800);
     const h1 = await page.evaluate(() => window.__office.frames());
     check(h1 === h0, 'frame loop not paused while hidden');
     check(errors.length === 0, 'perf page errors ' + errors.join('|'));
     await ctx.close();
   }
   {
-    const { ctx, page, errors } = await open(1280, 720, 2, `file://${ROOT}/index.html?demo=1&seed=5&onboarding=1`, 1500);
+    const { ctx, page, errors } = await open(1280, 720, 2, `file://${ROOT}/index.html?demo=1&seed=5&onboarding=1`, 1500, true);
     const cdp = await ctx.newCDPSession(page);
     await cdp.send('Performance.enable');
     await page.locator('[data-id="next"]').click();
@@ -1029,18 +1084,18 @@ async function perf() {
     await page.locator('[data-id="next"]').click();
     await page.locator('[data-id="next"]').click();
     const m0 = (await cdp.send('Performance.getMetrics')).metrics;
-    await sleep(6000);
+    await sleep(4000);
     const m1 = (await cdp.send('Performance.getMetrics')).metrics;
     const get = (m, n) => m.find((x) => x.name === n).value;
-    const cpu = (get(m1, 'TaskDuration') - get(m0, 'TaskDuration')) / 6;
-    console.log('cpu with the tour and settings open', (cpu * 100).toFixed(1) + '%');
+    const cpu = (get(m1, 'TaskDuration') - get(m0, 'TaskDuration')) / 4;
+    say('cpu with the tour and settings open', (cpu * 100).toFixed(1) + '%');
     check(cpu < 0.3, `cpu with the tour open too high ${cpu}`);
     check(errors.length === 0, 'tour perf errors ' + errors.join('|'));
     await ctx.close();
   }
   {
-    const { ctx, page, errors } = await open(1280, 720, 1, demoUrl('night=1'));
-    await sleep(4000);
+    const { ctx, page, errors } = await open(1280, 720, 1, demoUrl('night=1'), 700, true);
+    await sleep(3000);
     check((await page.evaluate(() => window.__office.dim())) > 0.5, 'night dim not applied');
     check((await page.evaluate(() => window.__office.sky())) === 'night', 'night sky not applied');
     await page.screenshot({ path: join(SHOTS, 'night.png') });
@@ -1060,14 +1115,14 @@ async function leaveCheck(vw, vh, tag) {
   const { ctx, page, errors } = await open(vw, vh, 1, `file://${ROOT}/index.html?onboarding=0`, 600);
   const feed = (drop) => page.evaluate((st) => window.__office.apply(st), leaveState(drop));
   await feed({});
-  await sleep(1500);
+  await nap(page, 1500);
   const base = await page.evaluate(() => ({ d: window.__office.desks().length, x: window.__office.elevator().x, ag: window.__office.agents().length }));
   check(base.d === 8 && base.ag === 8, `${tag} leave setup has ${base.d} desks, ${base.ag} agents`);
   await feed({ agents: ['r1_a0'] });
   const start = await page.evaluate(() => window.__office.agents().find((a) => a.id === 'r1_a0'));
   let closer = false, cab = false, deskKept = false, goneAt = -1, shot = false;
   for (let i = 0; i < 100; i++) {
-    await sleep(100);
+    await nap(page, 100);
     const s = await page.evaluate(() => ({ a: window.__office.agents().find((a) => a.id === 'r1_a0'), desk: window.__office.desks().some((d) => d.id === 'r1_a0'), n: window.__office.agents().length }));
     if (!s.a) { goneAt = i; break; }
     if (i < 4 && s.desk && s.a) deskKept = true;
@@ -1082,13 +1137,13 @@ async function leaveCheck(vw, vh, tag) {
   check(!after.d.includes('r1_a0') && after.ag === 7, `${tag} desk not freed after the agent left`);
   const back = leaveState({});
   await page.evaluate((st) => window.__office.apply(st), back);
-  await sleep(300);
+  await nap(page, 300);
   await feed({ agents: ['r4_a1'] });
-  await sleep(500);
+  await nap(page, 500);
   await page.evaluate((st) => window.__office.apply(st), back);
   let sat = false;
   for (let i = 0; i < 300 && !sat; i++) {
-    await sleep(100);
+    await nap(page, 100);
     const a = await page.evaluate(() => window.__office.agents().find((x) => x.id === 'r4_a1'));
     sat = !!a && !a.away && a.sit === 1 && !a.gone;
   }
@@ -1096,7 +1151,7 @@ async function leaveCheck(vw, vh, tag) {
   await feed({ rooms: ['r2'] });
   let slid = false, stillDrawn = false, ghostOut = 0, shot2 = false, shot3 = false;
   for (let i = 0; i < 600; i++) {
-    await sleep(60);
+    await nap(page, 60);
     const s = await page.evaluate(() => ({ an: window.__office.anim(), fl: window.__office.floors().map((f) => f.id), ag: window.__office.agents().length }));
     if (s.an && s.an.out > 0) {
       slid = true; ghostOut++;
@@ -1108,13 +1163,13 @@ async function leaveCheck(vw, vh, tag) {
   }
   check(slid && ghostOut >= 3, `${tag} removed floor never slid out (${ghostOut} frames)`);
   check(stillDrawn, `${tag} removed floor not kept while animating`);
-  await sleep(300);
+  await nap(page, 300);
   const final = await page.evaluate(() => ({ fl: window.__office.floors(), ds: window.__office.desks(), w: window.__office.world(), an: window.__office.animating(), ch: document.getElementById('cv').height, ag: window.__office.agents().map((a) => ({ id: a.id, x: a.x, y: a.y })).sort((p, q) => (p.id < q.id ? -1 : 1)) }));
   check(!final.an, `${tag} removal animation never finished`);
   check(final.ch === final.w.h, `${tag} canvas height ${final.ch} not shrunk to the world ${final.w.h}`);
   const fresh = await open(vw, vh, 1, `file://${ROOT}/index.html?onboarding=0`, 600);
   await fresh.page.evaluate((st) => window.__office.apply(st), leaveState({ rooms: ['r2'] }));
-  await sleep(1800);
+  await nap(fresh.page, 1800);
   const ref = await fresh.page.evaluate(() => ({ fl: window.__office.floors(), ds: window.__office.desks(), w: window.__office.world(), ag: window.__office.agents().map((a) => ({ id: a.id, x: a.x, y: a.y })).sort((p, q) => (p.id < q.id ? -1 : 1)) }));
   check(JSON.stringify(final.fl) === JSON.stringify(ref.fl), `${tag} floors differ from a fresh load: ${JSON.stringify(final.fl)} vs ${JSON.stringify(ref.fl)}`);
   check(JSON.stringify(final.ds) === JSON.stringify(ref.ds) && JSON.stringify(final.w) === JSON.stringify(ref.w), `${tag} desks or world differ from a fresh load`);
@@ -1125,21 +1180,13 @@ async function leaveCheck(vw, vh, tag) {
   await ctx.close();
 }
 
-if (want('leave') || want('ui')) {
-  await leaveCheck(1280, 720, 'l1280');
-  await leaveCheck(390, 844, 'l390');
-}
-if (want('demo')) {
-  const sizes = [[1280, 720], [1920, 1080], [750, 1000], [390, 844]];
-  for (const dpr of [1, 2]) for (const [w, h] of sizes) await runDemo(w, h, dpr, `d${w}x${dpr}`);
-}
 const NAMES = ['averyveryverylongprojectname', 'layer-by-layer-rollout', 'café-crème', '数据管道', 'a_b.c-d e', 'alpha', 'LONG-UPPER-NAME-HERE', 'fifteen-letters', 'two words here now'];
 async function runNames(vw, vh, dpr, tag) {
   const { ctx, page, errors } = await open(vw, vh, dpr, `file://${ROOT}/index.html?onboarding=0`, 900);
   const rooms = NAMES.map((label, i) => ({ id: 'n' + i, label }));
   const agents = rooms.map((r, i) => ({ id: 'na' + i, name: 'Fern' + i, room: r.id, state: 'idle', since: 0 }));
   await ev(page, (st) => window.__office.load(st), { rooms, agents, events: [], generatedAt: Date.now() });
-  await sleep(500);
+  await nap(page, 500);
   const d = await ev(page, (names) => ({ labels: window.__office.labels(), sign: window.__office.sign(), folds: names.map((n) => window.__office.fold(n)) }), NAMES);
   rooms.forEach((r, i) => {
     const rows = d.labels.filter((l) => l.id === r.id), nameRows = rows.slice(0, -1), full = d.folds[i], ts = nameRows.map((l) => l.t), last = ts[ts.length - 1];
@@ -1161,7 +1208,7 @@ async function runNames(vw, vh, dpr, tag) {
     mkdirSync(dir, { recursive: true });
     await page.screenshot({ path: join(dir, `office-${vw}.png`) });
     await page.click('#gear');
-    await sleep(500);
+    await nap(page, 500);
     check((await uiState(page)).settings, `${tag} settings did not open`);
     await page.screenshot({ path: join(dir, `settings-${vw}.png`) });
   }
@@ -1186,7 +1233,7 @@ async function behaviorRun(vw, vh, tag, chaos, shots) {
   await ev(page, (s) => window.__office.load(s), st);
   let ready = false;
   for (let i = 0; i < 160 && !ready; i++) {
-    await sleep(400);
+    await nap(page, 400);
     ready = await ev(page, () => window.__office.agents().filter((a) => a.queued).length === 5);
   }
   check(ready, `${tag} the five queued agents never settled in the waiting room`);
@@ -1196,17 +1243,14 @@ async function behaviorRun(vw, vh, tag, chaos, shots) {
   const snap = async (name) => {
     if (!shots || taken.has(name)) return;
     taken.add(name);
-    await ev(page, () => { window['__rafKeep'] = window.requestAnimationFrame; window.requestAnimationFrame = () => 0; });
-    await sleep(120);
     await page.screenshot({ path: join(dir, `${name}-${vw}.png`) });
-    await ev(page, () => { window.requestAnimationFrame = window['__rafKeep']; window.requestAnimationFrame((0, eval)('frame')); });
   };
   let maxDrift = 0, sawFace = false, sawDoze = null, workingMoved = false, sawWave = false;
   const wake = { done: false };
-  const t0 = Date.now();
+  const t0 = vnow(page);
   const limit = chaos === 0 ? 14000 : 80000;
-  while (Date.now() - t0 < limit) {
-    await sleep(chaos === 0 ? 500 : 150);
+  while (vnow(page) - t0 < limit) {
+    await nap(page, chaos === 0 ? 500 : 150);
     const d = await ev(page, () => ({ b: window.__office.behavior(), ag: window.__office.agents(), q: window.__office.queue() }));
     d.q.want.forEach((id, i) => {
       const a = d.ag.find((x) => x.id === id);
@@ -1223,17 +1267,17 @@ async function behaviorRun(vw, vh, tag, chaos, shots) {
       const st2 = behaviorFixture();
       st2.agents.find((a) => a.id === sawDoze).state = 'working';
       await ev(page, (s) => window.__office.load(s), st2);
-      await sleep(250);
+      await nap(page, 250);
       const dz = await ev(page, () => window.__office.behavior().dozing);
       check(!dz.includes(sawDoze), `${tag} agent kept dozing after its real state changed to working`);
       await ev(page, (s) => window.__office.load(s), behaviorFixture());
     }
     const b = d.b;
     const chainOk = b.log.some((e) => e.chain >= 2);
-    if (chaos > 0 && chainOk && sawFace && sawDoze && sawWave && Date.now() - t0 > 20000) break;
+    if (chaos > 0 && chainOk && sawFace && sawDoze && sawWave && vnow(page) - t0 > 20000) break;
   }
   const b = await ev(page, () => window.__office.behavior());
-  console.log(tag, 'chaos', chaos, 'log', b.log.length, 'maxDrift', maxDrift.toFixed(2));
+  say(tag, 'chaos', chaos, 'log', b.log.length, 'maxDrift', maxDrift.toFixed(2));
   check(!workingMoved, `${tag} a working agent left its desk`);
   check(b.log.every((e) => e.state !== 'working' || e.act === 'shh'), `${tag} a working agent acted`);
   check(b.log.filter((e) => e.act === 'doze').every((e) => e.state === 'idle'), `${tag} a non-idle agent dozed`);
@@ -1264,20 +1308,19 @@ async function behaviorRun(vw, vh, tag, chaos, shots) {
     st3.queue = ag.slice(1);
     st3.queueSize = 6;
     st3.line = ['bw1', null, 'bw2', 'bw3', null, 'bw4'];
-    const rec = await ev(page, (s) => new Promise((res) => {
+    const rec = await ev(page, (s) => {
       const o = window.__office;
       const first = new Map(o.agents().filter((a) => a.queued).map((a) => [a.id, a.x]));
       const started = new Map();
       const tStart = o.behavior().t;
       o.load(s);
-      const step = () => {
+      for (;;) {
+        o.advance(1 / 15);
         const t = o.behavior().t;
         for (const a of o.agents()) if (first.has(a.id) && !started.has(a.id) && Math.abs(a.x - first.get(a.id)) > 0.5) started.set(a.id, t);
-        if (t - tStart > 5) res({ want: o.queue().want, started: [...started.entries()] });
-        else requestAnimationFrame(step);
-      };
-      requestAnimationFrame(step);
-    }), st3);
+        if (t - tStart > 5) return { want: o.queue().want, started: [...started.entries()] };
+      }
+    }, st3);
     const starts = rec.want.map((id) => (rec.started.find((e) => e[0] === id) || [id, null])[1]).filter((v) => v !== null);
     check(starts.length >= 3, `${tag} too few waiters stepped forward: ${JSON.stringify(rec)}`);
     let ordered = true;
@@ -1305,19 +1348,16 @@ async function coolerRun(vw, vh, tag, chaos, shots) {
   const snap = async (name) => {
     if (!shots || taken.has(name)) return;
     taken.add(name);
-    await ev(page, () => { window['__rafKeep'] = window.requestAnimationFrame; window.requestAnimationFrame = () => 0; });
-    await sleep(120);
     await page.screenshot({ path: join(dir, `${name}-${vw}.png`) });
-    await ev(page, () => { window.requestAnimationFrame = window['__rafKeep']; window.requestAnimationFrame((0, eval)('frame')); });
   };
   const sample = () => ev(page, () => ({ b: window.__office.behavior(), ag: window.__office.agents(), ds: window.__office.desks(), q: window.__office.queue() }));
   const load = (st) => ev(page, (s) => window.__office.load(s), st);
   await load(coolerFixture(true));
-  await sleep(800);
+  await nap(page, 800);
   await load(coolerFixture(false));
   let ready = false;
   for (let i = 0; i < 200 && !ready; i++) {
-    await sleep(300);
+    await nap(page, 300);
     const d = await sample();
     ready = d.ds.filter((x) => x.room === 'c2').length === 5 && d.b.props.some((p) => p.id === 'c2' && (p.kind === 'cooler' || p.kind === 'coffee')) && d.ag.every((a) => !a.away && a.sit === 1);
   }
@@ -1351,11 +1391,11 @@ async function coolerRun(vw, vh, tag, chaos, shots) {
     for (const a of d.ag.filter((x) => x.id === 'cw0' || x.id === 'cw2')) if (a.away || a.sit !== 1 || Math.abs(a.x - deskX.get(a.id)) > 0.6) workerMoved = true;
     return at;
   };
-  const t0 = Date.now();
+  const t0 = vnow(page);
   const limit = chaos === 0 ? 14000 : 90000;
   let waitedState = false;
-  while (Date.now() - t0 < limit) {
-    await sleep(chaos === 0 ? 400 : 120);
+  while (vnow(page) - t0 < limit) {
+    await nap(page, chaos === 0 ? 400 : 120);
     const d = await sample();
     const at = collect(d);
     if (at.length >= 2 && d.b.poses.some((p) => p.text && p.text !== 'SHH')) await snap('cooler-chat');
@@ -1366,7 +1406,7 @@ async function coolerRun(vw, vh, tag, chaos, shots) {
       await load(coolerFixture(false, { [who]: { state: 'waiting' } }));
       let queued = false, seenAfter = false;
       for (let i = 0; i < 160 && !queued; i++) {
-        await sleep(150);
+        await nap(page, 150);
         const d2 = await sample();
         collect(d2);
         const me = d2.ag.find((x) => x.id === who);
@@ -1376,7 +1416,7 @@ async function coolerRun(vw, vh, tag, chaos, shots) {
       check(queued, `${tag} an agent at the cooler did not go into the queue after its state became waiting`);
       await load(coolerFixture(false));
       for (let i = 0; i < 160; i++) {
-        await sleep(150);
+        await nap(page, 150);
         const d2 = await sample();
         collect(d2);
         const me = d2.ag.find((x) => x.id === who);
@@ -1386,18 +1426,18 @@ async function coolerRun(vw, vh, tag, chaos, shots) {
       const me = d3.ag.find((x) => x.id === who);
       check(!!me && !me.away && me.sit === 1 && Math.abs(me.x - deskX.get(who)) < 0.6, `${tag} the queued agent never came back to its own desk ${JSON.stringify(me)}`);
     }
-    if (chaos > 0 && waitedState && events.filter((e) => e.act === 'cooler').length >= 6 && events.some((e) => e.act === 'shh') && Date.now() - t0 > 30000 && (!shots || taken.has('shh'))) break;
+    if (chaos > 0 && waitedState && events.filter((e) => e.act === 'cooler').length >= 6 && events.some((e) => e.act === 'shh') && vnow(page) - t0 > 30000 && (!shots || taken.has('shh'))) break;
   }
   const bossRes = { scattered: false, woke: false };
   if (chaos > 0) {
     for (let att = 0; att < 10 && !bossRes.scattered; att++) {
       let d = await sample();
-      for (let i = 0; i < 300 && !collect(d).length; i++) { await sleep(120); d = await sample(); }
+      for (let i = 0; i < 300 && !collect(d).length; i++) { await nap(page, 120); d = await sample(); }
       const tAt = d.b.t;
       await ev(page, () => window.__office.visit('cw0'));
-      const t1 = Date.now();
-      while (Date.now() - t1 < 25000 && !bossRes.scattered) {
-        await sleep(120);
+      const t1 = vnow(page);
+      while (vnow(page) - t1 < 25000 && !bossRes.scattered) {
+        await nap(page, 120);
         d = await sample();
         collect(d);
         const sc = events.find((e) => e.act === 'scatter' && e.t >= tAt);
@@ -1405,41 +1445,41 @@ async function coolerRun(vw, vh, tag, chaos, shots) {
           bossRes.scattered = true;
           await snap('boss-scatter');
           let d2 = d;
-          for (let i = 0; i < 100 && d2.b.t < sc.t + 1.2; i++) { await sleep(60); d2 = await sample(); collect(d2); }
+          for (let i = 0; i < 100 && d2.b.t < sc.t + 1.2; i++) { await nap(page, 60); d2 = await sample(); collect(d2); }
           const c = d2.b.cooler.find((x) => x.key === sc.key);
           check(!c || c.phase !== 'at', `${tag} the cooler chatter ${sc.key} was still chatting ${d2.b.t - sc.t}s after the boss walked by`);
         }
       }
-      for (let i = 0; i < 120; i++) { await sleep(150); d = await sample(); collect(d); if (!d.b.cooler.length && !(await ev(page, () => window.__office.bossActor().away))) break; }
+      for (let i = 0; i < 120; i++) { await nap(page, 150); d = await sample(); collect(d); if (!d.b.cooler.length && !(await ev(page, () => window.__office.bossActor().away))) break; }
     }
     check(bossRes.scattered, `${tag} the boss walking past never scattered a cooler chat`);
     for (let att = 0; att < 10 && !bossRes.woke; att++) {
       let d = await sample();
-      for (let i = 0; i < 400 && !d.b.dozing.length; i++) { await sleep(150); d = await sample(); collect(d); }
+      for (let i = 0; i < 400 && !d.b.dozing.length; i++) { await nap(page, 150); d = await sample(); collect(d); }
       if (!d.b.dozing.length) break;
       const tAt = d.b.t, dz = d.b.dozing[0];
       await ev(page, () => window.__office.visit('ds0'));
-      const t1 = Date.now();
-      while (Date.now() - t1 < 25000 && !bossRes.woke) {
-        await sleep(120);
+      const t1 = vnow(page);
+      while (vnow(page) - t1 < 25000 && !bossRes.woke) {
+        await nap(page, 120);
         d = await sample();
         collect(d);
         const wk = events.find((e) => e.act === 'wake' && e.t >= tAt);
         if (wk) {
           bossRes.woke = true;
           let d2 = d;
-          for (let i = 0; i < 100 && d2.b.t < wk.t + 1; i++) { await sleep(60); d2 = await sample(); }
+          for (let i = 0; i < 100 && d2.b.t < wk.t + 1; i++) { await nap(page, 60); d2 = await sample(); }
           check(!d2.b.dozing.includes(wk.key), `${tag} ${wk.key} kept dozing after the boss walked by (${dz})`);
           await snap('boss-wake');
         }
       }
-      for (let i = 0; i < 120; i++) { await sleep(150); if (!(await ev(page, () => window.__office.bossActor().away))) break; }
+      for (let i = 0; i < 120; i++) { await nap(page, 150); if (!(await ev(page, () => window.__office.bossActor().away))) break; }
     }
     check(bossRes.woke, `${tag} the boss walking past never woke a dozer`);
   }
   const d = await sample();
   collect(d);
-  console.log(tag, 'chaos', chaos, 'cooler events', events.filter((e) => e.act === 'cooler').length, 'chats', events.filter((e) => e.act === 'cooler-chat').length, 'shh', events.filter((e) => e.act === 'shh').length, 'maxAt', maxAt);
+  say(tag, 'chaos', chaos, 'cooler events', events.filter((e) => e.act === 'cooler').length, 'chats', events.filter((e) => e.act === 'cooler-chat').length, 'shh', events.filter((e) => e.act === 'shh').length, 'maxAt', maxAt);
   check(!workerMoved, `${tag} a working agent left its desk`);
   check(maxAt <= 3, `${tag} ${maxAt} agents at one cooler`);
   check(badReturn === '', `${tag} a cooler visitor did not return to its own desk: ${badReturn}`);
@@ -1459,23 +1499,64 @@ async function coolerRun(vw, vh, tag, chaos, shots) {
   check(errors.length === 0, `${tag} cooler console errors ${errors.join('|')}`);
   await ctx.close();
 }
-if (want('behavior') || want('ui')) {
-  await behaviorRun(1280, 720, 'b1280', 3, true);
-  await behaviorRun(390, 844, 'b390', 3, true);
-  await behaviorRun(1280, 720, 'b0', 0, false);
+const SIZES = [[1280, 720], [1920, 1080], [750, 1000], [390, 844]];
+const plan = [];
+const add = (name, groups, fn, quick = false) => {
+  if (QUICK ? quick : groups.some(want)) plan.push({ name, fn });
+};
+add('server', ['server'], serverJob, true);
+add('crowd', ['server'], crowdJob, true);
+add('live', ['live'], liveJob, true);
+add('leave l1280', ['leave', 'ui'], () => leaveCheck(1280, 720, 'l1280'), true);
+add('leave l390', ['leave', 'ui'], () => leaveCheck(390, 844, 'l390'));
+for (const dpr of [1, 2]) for (const [w, h] of SIZES) add(`demo ${w}x${dpr}`, ['demo'], () => runDemo(w, h, dpr, `d${w}x${dpr}`), dpr === 1 && w === 1280);
+add('behavior b1280', ['behavior', 'ui'], () => behaviorRun(1280, 720, 'b1280', 3, true), true);
+add('behavior b390', ['behavior', 'ui'], () => behaviorRun(390, 844, 'b390', 3, true));
+add('behavior b0', ['behavior', 'ui'], () => behaviorRun(1280, 720, 'b0', 0, false), true);
+add('cooler c1280', ['behavior', 'ui', 'cooler'], () => coolerRun(1280, 720, 'c1280', 3, true), true);
+add('cooler c390', ['behavior', 'ui', 'cooler'], () => coolerRun(390, 844, 'c390', 3, true));
+add('cooler c0', ['behavior', 'ui', 'cooler'], () => coolerRun(1280, 720, 'c0', 0, false), true);
+for (const dpr of [1, 2]) for (const [w, h] of SIZES) add(`names ${w}x${dpr}`, ['ui'], () => runNames(w, h, dpr, `n${w}x${dpr}`), dpr === 1 && w === 1280);
+for (const dpr of [1, 2]) for (const [w, h] of SIZES) add(`ui ${w}x${dpr}`, ['ui'], () => runUi(w, h, dpr, `u${w}x${dpr}`), dpr === 1 && w === 1280);
+
+async function runPlan(list) {
+  const state = list.map((j) => ({ ...j, lines: [], contexts: new Set(), servers: new Set(), done: false, seconds: 0 }));
+  let next = 0, flushed = 0;
+  const flush = () => {
+    while (flushed < state.length && state[flushed].done) {
+      for (const line of state[flushed].lines) console.log(line);
+      flushed++;
+    }
+  };
+  const worker = async () => {
+    while (next < state.length) {
+      const job = state[next++];
+      const t0 = Date.now();
+      try { await jobs.run(job, job.fn); } catch (e) {
+        fails.push(`${job.name} crashed`);
+        job.lines.push(`FAIL ${job.name} crashed: ${e instanceof Error ? e.stack : e}`);
+      } finally {
+        await Promise.all([...job.servers].map((server) => new Promise((resolve) => {
+          if (server.exitCode !== null || server.signalCode !== null) return resolve();
+          server.once('exit', resolve);
+          server.kill();
+        })));
+        await Promise.all([...job.contexts].map((ctx) => ctx.close().catch(() => {})));
+      }
+      job.seconds = (Date.now() - t0) / 1000;
+      job.done = true;
+      flush();
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(JOBS, state.length) }, worker));
+  if (process.env.TIMES) for (const j of state) console.log(`time ${j.name} ${j.seconds.toFixed(1)}s`);
 }
-if (want('behavior') || want('ui') || want('cooler')) {
-  await coolerRun(1280, 720, 'c1280', 3, true);
-  await coolerRun(390, 844, 'c390', 3, true);
-  await coolerRun(1280, 720, 'c0', 0, false);
-}
-if (want('ui')) {
-  const sizes = [[1280, 720], [1920, 1080], [750, 1000], [390, 844]];
-  for (const dpr of [1, 2]) for (const [w, h] of sizes) await runNames(w, h, dpr, `n${w}x${dpr}`);
-  for (const dpr of [1, 2]) for (const [w, h] of sizes) await runUi(w, h, dpr, `u${w}x${dpr}`);
-}
-if (want('perf')) await perf();
+
+const started = Date.now();
+await runPlan(plan);
+if (want('perf') && !QUICK) await perf();
 
 if (browser) await browser.close();
+console.log(`${QUICK ? 'quick tier' : 'full run'} in ${((Date.now() - started) / 1000).toFixed(0)}s`);
 console.log(fails.length ? `${fails.length} FAILURES` : 'ALL PASS');
 process.exit(fails.length ? 1 : 0);

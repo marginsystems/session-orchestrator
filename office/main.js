@@ -9,9 +9,22 @@ const step = function (dt) {
   stepUi(dt);
 };
 
+let frameRemainder = 0;
+const advance = function (seconds) {
+  const dt = (1 / 15) * SPEED * (DEMO ? S.set.speed : 1);
+  const frames = seconds * 15 + frameRemainder;
+  const n = Math.round(frames);
+  frameRemainder = frames - n;
+  for (let i = 0; i < n; i++) step(dt);
+  draw(S.t);
+  renderUi(S.t);
+};
+
+const held = window['__officeHold'] === true;
 let raf = 0, last = 0;
 const frame = function (now) {
   raf = requestAnimationFrame(frame);
+  if (held) return;
   if (now - last < 1000 / 15 - 3) return;
   const dt = Math.min(0.1, (now - last) / 1000) * SPEED * (DEMO ? S.set.speed : 1);
   last = now;
@@ -70,4 +83,6 @@ window['__office'] = {
   ui: () => ({ settings: UI.settings, tour: UI.tour ? { step: UI.tour.step, shown: UI.tour.shown, len: UI.tour.text.length, text: UI.tour.text, did: UI.tour.did } : null, U: { ...U }, dialog: UI.dialog, strip: UI.strip, geo: UI.geo ? { x: UI.geo.x, y: UI.geo.y, w: UI.geo.w, h: UI.geo.h, rows: UI.geo.rows, n: UI.geo.n } : null, dpr: window.devicePixelRatio || 1, canvas: (() => { const r = uc.getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width, h: r.height }; })() }),
   sky: () => S.sky,
   behavior: () => behaviorSnapshot(),
+  advance,
+  poll: () => poll(),
 };

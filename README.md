@@ -177,7 +177,14 @@ PW_DIR=<dir containing node_modules/playwright> SHOTS=<scratch dir> node test/ch
 
 The server and live sections bind free ports picked at start; set `SO_TEST_PORT=<n>` to use `n`, `n+1` and `n+2` instead.
 
-`ONLY=unit,server,live,demo,ui,perf` runs a subset. It covers human prompt detection against synthetic fixtures, the settings API (validation, size limit, origin checks, persistence, priority and queue order) against a temporary `HOME`, the settings panel, the tour, the queue and secretary, boss visits and joins, layout and alignment, console errors, CPU and pause-when-hidden at 1280x720, 1920x1080, 750x1000 and 390x844 at device pixel ratios 1 and 2.
+Two tiers:
+
+- Quick: `TIER=quick PW_DIR=<dir> node test/check.mjs` (or `ONLY=quick`, or `npm run test:quick` with `PW_DIR` exported) runs the unit, server and live sections and one viewport (1280x720 at device pixel ratio 1) of the demo, ui, names, behavior and cooler sections. It takes about 20 seconds. Use it while iterating.
+- Full: `PW_DIR=<dir> SHOTS=<dir> node test/check.mjs` (or `npm run test:full`) runs everything at all eight viewport and pixel-ratio combinations plus the CPU and pause-when-hidden section. It takes one to two minutes. Run it before a PR.
+
+The browser sections do not wait in real time. The test pages set `window.__officeHold` before load, which stops the page stepping itself, and the tests drive the simulation with `window.__office.advance(seconds)`, which steps the same task generators at the 15 frames a second the page runs at. `advance` and the hold exist only for tests; a page without `__officeHold` behaves as before. Live sections still use real time for the server's two-second rescan and the settings POST, and the perf section samples real CPU time and frames. Up to six sections run at once (`JOBS=<n>` changes that); each prints its output as a block, in a fixed order. `TIMES=1` also prints how long each section took.
+
+`ONLY=unit,server,live,demo,ui,perf` runs a subset (`leave`, `behavior` and `cooler` also work; `ui` includes `leave`, `behavior` and `cooler`). It covers human prompt detection against synthetic fixtures, the settings API (validation, size limit, origin checks, persistence, priority and queue order) against a temporary `HOME`, the settings panel, the tour, the queue and secretary, boss visits and joins, layout and alignment, console errors, CPU and pause-when-hidden at 1280x720, 1920x1080, 750x1000 and 390x844 at device pixel ratios 1 and 2.
 
 ## Roadmap
 
