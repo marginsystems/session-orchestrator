@@ -263,12 +263,12 @@ const setFocus = function (agentId, at) {
 const queueTask = function* (a) {
   a.q = true; a.away = true;
   yield* stand(a);
-  yield* goTo(a, BOSS, lineX(Math.max(0, S.want.indexOf(a.id))));
+  yield* goTo(a, BOSS, lineX(slotOf(a.id)));
   for (;;) {
     if (S.focus && S.focus.agentId === a.id) { yield* focusTrip(a, S.focus.token, true); return; }
     const k = S.want.indexOf(a.id);
     if (k < 0 || a.gone) break;
-    const tx = lineX(k);
+    const tx = lineX(slotOf(a.id));
     a.facing = -1;
     if (Math.abs(a.x - tx) > 0.5) yield* walkTo(a, tx); else yield;
   }
@@ -285,7 +285,7 @@ const syncLine = function () {
   const want = S.queue.filter((id) => {
     const a = S.agents.get(id);
     return a && !a.visitor && !a.gone && a.state === 'waiting' && a.slot >= 0 && id !== fid;
-  }).slice(0, lineCap());
+  });
   S.want = want;
   for (const id of want) {
     const a = S.agents.get(id);

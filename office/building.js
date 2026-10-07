@@ -27,7 +27,7 @@ const SEC = { t0: -9, fake: { seed: 5, state: 'working', hop: 0, react: -9, slee
 
 const newAnim = (t0, from, slide, out, keepH) => ({ t0, dur: out.length ? 0.9 : 0.8, from: new Map(from.map((id, i) => [id, i])), p: 0, pf: 0, ps: 0, slide, out, keepH });
 
-const S = { rooms: TYPE_ONLY ? [{ id: '', label: '' }] : [], floors: [BOSS, LOBBY], agents: new Map(TYPE_ONLY ? [['', B]] : []), slots: new Map(TYPE_ONLY ? [['', ['']]] : []), Hf: 70, s: 2, dpr: 1, LW: 380, LH: 300, t: 0, dt: 0.07, dim: 0, sig: '', tasks: TYPE_ONLY ? [{ gen: wait(0), done: false }] : [], vid: 0, sky: 'day', counts: { working: 0, waiting: 0, idle: 0 }, msg: '', focus: TYPE_ONLY ? { token: '', agentId: '' } : null, frames: 0, dyn: { coffees: TYPE_ONLY ? [{ id: '', x: 0, dy: 0 }] : [] }, set: { ...DEF_SET }, last: TYPE_ONLY ? { rooms: [{ id: '', label: '' }] } : null, queue: TYPE_ONLY ? [''] : [], queueSize: 0, want: TYPE_ONLY ? [''] : [], anim: TYPE_ONLY ? newAnim(0, [], [], [], 0) : null, fc: TYPE_ONLY ? new Map([['', stCv]]) : null, bgCv: TYPE_ONLY ? stCv : null, posting: 0, wall: new Map(), visits: TYPE_ONLY ? [''] : [], visitLog: TYPE_ONLY ? [{ id: '', agentAway: false, agentBubble: false, answered: false }] : [], drops: new Map(), puffs: TYPE_ONLY ? [{ x: 0, y: 0, t0: 0 }] : [], joined: new Set(), firstApplied: false, gotState: false, setReady: false, particles: TYPE_ONLY ? [{ x: 0, y: 0, vx: 0, vy: 0, col: '', life: 0, sz: 0 }] : [] };
+const S = { rooms: TYPE_ONLY ? [{ id: '', label: '' }] : [], floors: [BOSS, LOBBY], agents: new Map(TYPE_ONLY ? [['', B]] : []), slots: new Map(TYPE_ONLY ? [['', ['']]] : []), Hf: 70, s: 2, dpr: 1, LW: 380, LH: 300, t: 0, dt: 0.07, dim: 0, sig: '', tasks: TYPE_ONLY ? [{ gen: wait(0), done: false }] : [], vid: 0, sky: 'day', counts: { working: 0, waiting: 0, idle: 0 }, msg: '', focus: TYPE_ONLY ? { token: '', agentId: '' } : null, frames: 0, dyn: { coffees: TYPE_ONLY ? [{ id: '', x: 0, dy: 0 }] : [] }, set: { ...DEF_SET }, last: TYPE_ONLY ? { rooms: [{ id: '', label: '' }] } : null, queue: TYPE_ONLY ? [''] : [], queueSize: 0, line: TYPE_ONLY ? ['', null] : [], want: TYPE_ONLY ? [''] : [], anim: TYPE_ONLY ? newAnim(0, [], [], [], 0) : null, fc: TYPE_ONLY ? new Map([['', stCv]]) : null, bgCv: TYPE_ONLY ? stCv : null, posting: 0, wall: new Map(), visits: TYPE_ONLY ? [''] : [], visitLog: TYPE_ONLY ? [{ id: '', agentAway: false, agentBubble: false, answered: false }] : [], drops: new Map(), puffs: TYPE_ONLY ? [{ x: 0, y: 0, t0: 0 }] : [], joined: new Set(), firstApplied: false, gotState: false, setReady: false, particles: TYPE_ONLY ? [{ x: 0, y: 0, vx: 0, vy: 0, col: '', life: 0, sz: 0 }] : [] };
 const E = { fy: 0, open: 0, moving: false, queue: TYPE_ONLY ? [{ a: B, fromRoom: '', toRoom: '', state: '' }] : [], rider: TYPE_ONLY ? B : null, use: new Map(), ding: TYPE_ONLY ? { f: 0, t0: 0 } : null };
 
 const T0 = () => (HUD ? HUDH : 0) + ROOFH;
@@ -53,7 +53,12 @@ const bossSpot = () => bossX() + 5 + BOSS_DESK_W + 10;
 const hallW = () => clamp(Math.floor((zr() - bossSpot() - 34) * 0.6), 100, 160);
 const doorX = () => zr() - hallW();
 const lineCap = () => Math.max(2, Math.floor((hallW() - 46) / 13));
-const lineX = (k) => doorX() + 44 + k * 13;
+const seatX = (k) => doorX() + 44 + k * 13;
+const lineX = (k) => {
+  const n = Math.max(1, S.line.length), left = doorX() + 44, right = doorX() + hallW() - 8;
+  return Math.round(left + k * (n <= 1 ? 13 : Math.min(13, (right - left) / (n - 1))));
+};
+const slotOf = (id) => { const k = S.line.indexOf(id); return k >= 0 ? k : Math.max(0, S.want.indexOf(id)); };
 const secX = () => doorX() + 10;
 const yOf = (a) => (a.inCab ? Math.round(cabFoot()) : footY(fIdx(a.fr)));
 
@@ -175,7 +180,7 @@ const drawFloor = function (c, i, id, collect) {
     const sign = 'TAKE A NUMBER';
     text(c, sign, dX + 6 + Math.floor((hw - 6 - textW(sign)) / 2), top + 15, '#ffcd75');
     secretaryDesk(c, secX(), fy);
-    for (let k = 0; k < lineCap(); k++) chair(c, lineX(k), fy);
+    for (let k = 0; k < lineCap(); k++) chair(c, seatX(k), fy);
     return;
   }
   const order = lobby ? ['reception', 'plant', 'sofa', 'bigplant', 'cooler', 'plant'] : ['bookshelf', 'cooler', 'coffee', 'plant', 'printer', 'lamp', 'bigplant', 'cactus'];

@@ -70,6 +70,7 @@ const applyState = function (raw) {
   assignWalls();
   S.queue = (s.queue || []).slice();
   S.queueSize = typeof s.queueSize === 'number' ? s.queueSize : S.queue.length;
+  S.line = Array.isArray(s.line) ? s.line.map((id) => (id && S.agents.has(id) ? id : null)) : S.queue.slice();
   const added = S.floors.filter((id) => !oldFloors.includes(id));
   const removed = oldFloors.filter((id) => !S.floors.includes(id));
   const moved = S.floors.some((id) => oldFloors.includes(id) && oldFloors.indexOf(id) !== S.floors.indexOf(id));

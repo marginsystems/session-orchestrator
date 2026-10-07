@@ -581,6 +581,7 @@ if (want('server')) {
   const expectDefault = [ids.atlas300, ids.delta400, ids.beacon380, ids.beacon200, ids.citadel240];
   check(JSON.stringify(s.queue) === JSON.stringify(expectDefault), `server default queue ${JSON.stringify(s.queue)} != ${JSON.stringify(expectDefault)}`);
   check(s.queueSize === 6, `queueSize ${s.queueSize} is not the number of items in queue.json`);
+  check(s.line.length === 6 && s.line[1] === null && JSON.stringify(s.line.filter((id) => id)) === JSON.stringify(expectDefault), `waiting room line ${JSON.stringify(s.line)}`);
   const raw = JSON.stringify(s);
   check(!raw.includes('/work') && !raw.includes(fixtureHome) && !/"title"/.test(raw), 'state.json leaks paths or titles by default');
   const ok = { origin: `http://127.0.0.1:${SPORT}`, 'content-type': 'application/json' };
@@ -780,8 +781,8 @@ if (want('live')) {
     const q = await queueWait(page);
     const expect = [ids.atlas300, ids.delta400, ids.beacon380, ids.beacon200, ids.citadel240].filter((id) => q.queue.includes(id));
     check(JSON.stringify(q.queue) === JSON.stringify(expect), `browser queue ${JSON.stringify(q.queue)} != ${JSON.stringify(expect)}`);
-    check(q.want.length === Math.min(q.cap, q.queue.length), `queue seats ${q.want.length} vs capacity ${q.cap}`);
-    check(q.size === 6 && q.extra === q.queue.length - q.want.length + 1, `waiting room overflow count ${q.extra} for ${q.queue.length} queued, ${q.want.length} seated, ${q.size} items`);
+    check(q.want.length === q.queue.length, `waiting room holds ${q.want.length} of ${q.queue.length} queued agents`);
+    check(q.size === 6 && q.line.length === 6 && q.guests === 1, `waiting room line ${JSON.stringify(q.line)} guests ${q.guests} for ${q.size} items`);
     check(JSON.stringify(q.want) === JSON.stringify(expect.slice(0, q.want.length)), `waiting room order ${JSON.stringify(q.want)} differs from fixture queue ${JSON.stringify(expect)}`);
     await queueSeatCheck(page, 'live');
     await page.screenshot({ path: join(SHOTS, 'live-queue.png') });

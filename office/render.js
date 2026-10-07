@@ -169,27 +169,26 @@ const drawDrops = function () {
   }
 };
 
-const queueExtra = function () {
-  const fid = S.focus && S.focus.agentId;
-  const onScreen = S.queue.filter((id) => id !== fid).length;
-  return Math.max(0, onScreen - S.want.length) + Math.max(0, S.queueSize - S.queue.length);
+const guestStyles = new Map();
+const drawGuests = function (t) {
+  S.line.forEach((id, k) => {
+    if (id !== null) return;
+    let g = guestStyles.get(k);
+    if (!g) { g = { st: styleFor('guest' + k), seed: hash('guest' + k) }; guestStyles.set(k, g); }
+    drawWaiter({ x: lineX(k), st: g.st, seed: g.seed }, t);
+  });
 };
 
 const drawQueueMarks = function () {
-  const fy = footY(fIdx(BOSS));
-  S.want.forEach((id, k) => {
-    const a = S.agents.get(id);
-    if (!a || !a.q || a.fr !== BOSS || a.walking || a.inCab) return;
-    const t = String(k + 1), x = Math.round(a.x) - Math.floor(textW(t) / 2), y = fy - 30;
+  const fy = footY(fIdx(BOSS)), roomy = S.line.length < 2 || lineX(1) - lineX(0) >= 12;
+  S.line.forEach((id, k) => {
+    if (k > 0 && !roomy) return;
+    const a = id ? S.agents.get(id) : null;
+    if (id && (!a || !a.q || a.fr !== BOSS || a.walking || a.inCab)) return;
+    const t = String(k + 1), x = lineX(k) - Math.floor(textW(t) / 2), y = fy - 30;
     text(ctx, t, x + 1, y + 1, '#1a1c2c');
     text(ctx, t, x, y, k === 0 ? '#ffcd75' : '#f4f4f4');
   });
-  const extra = queueExtra();
-  if (extra > 0) {
-    const t = '+' + extra + ' MORE', x = doorX() + hallW() - 5 - textW(t), y = floorTop(fIdx(BOSS)) + 26;
-    R(ctx, x - 2, y - 2, textW(t) + 4, 11, '#1a1c2c');
-    text(ctx, t, x, y, '#ffcd75');
-  }
 };
 
 const drawTag = function (a) {
@@ -320,6 +319,7 @@ const draw = function (t) {
   drawBoss(t);
   drawSecretary(t);
   const all = [...S.agents.values()];
+  drawGuests(t);
   for (const a of all) if (!a.away) drawAgent(a, t);
   drawCab(t);
   for (const a of all) if (a.away && !a.inCab) drawAgent(a, t);

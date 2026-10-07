@@ -302,16 +302,19 @@ function readQueue(now, desktop) {
   try {
     const f = JSON.parse(readFileSync(QUEUE_FILE, 'utf8'));
     const at = Date.parse(f.at);
-    if (!Number.isFinite(at) || at > now + 60000 || now - at >= FOCUS_MAX_MS || !Array.isArray(f.items)) return { uuids: [], size: 0, orchestrator: '' };
+    if (!Number.isFinite(at) || at > now + 60000 || now - at >= FOCUS_MAX_MS || !Array.isArray(f.items)) return { uuids: [], slots: [], size: 0, orchestrator: '' };
     const items = f.items.slice(0, QUEUE_MAX);
     const uuids = [];
+    const slots = [];
     for (const it of items) {
       const uuid = toUuid(typeof it === 'string' ? it : it && it.sessionId, desktop);
-      if (uuid && !uuids.includes(uuid)) uuids.push(uuid);
+      const fresh = uuid !== '' && !uuids.includes(uuid);
+      if (fresh) uuids.push(uuid);
+      slots.push(fresh ? uuid : '');
     }
-    return { uuids, size: items.length, orchestrator: toUuid(f.orchestrator, desktop) };
+    return { uuids, slots, size: items.length, orchestrator: toUuid(f.orchestrator, desktop) };
   } catch {
-    return { uuids: [], size: 0, orchestrator: '' };
+    return { uuids: [], slots: [], size: 0, orchestrator: '' };
   }
 }
 
@@ -478,7 +481,7 @@ function scan(now = Date.now()) {
   const foundUuids = new Set(found.map((s) => s.uuid));
   const queue = queued.filter((u) => foundUuids.has(u)).map((u) => byUuid.get(u)?.id || 'a' + sha(u).slice(0, 8));
 
-  return { generatedAt: now, rooms: outRooms, agents: agents.map((a) => a.agent), events, focus, queue, queueSize: queueFile.size };
+  return { generatedAt: now, rooms: outRooms, agents: agents.map((a) => a.agent), events, focus, queue, queueSize: queueFile.size, line: queueFile.slots.map((u) => { const a = u ? byUuid.get(u) : undefined; return a ? a.id : null; }) };
 }
 
 function counts(snap) {

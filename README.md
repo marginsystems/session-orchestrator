@@ -106,7 +106,7 @@ The waiting room is the orchestrator's queue. The orchestrator writes it to `~/.
 
 `orchestrator` is the orchestrator session's own id: prompts typed there do not send the boss out of his office.
 
-Every queued session stands in the waiting room in that order, front first; items without a session are skipped. `scan.mjs` only reads the file. A missing file or one older than 24 hours means an empty waiting room. `state.json` lists the queued agents in `queue` and the total number of items in `queue.json`, including items without a session, in `queueSize`.
+Every item stands in the waiting room in that order, front first, so a long queue is a crowded room: queued sessions that are on screen walk up from their desks, and items without a session (or whose session is not on screen) stand there as guests. `state.json` gives the full line in `line`, an agent id or `null` per item. `scan.mjs` only reads the file. A missing file or one older than 24 hours means an empty waiting room. `state.json` lists the queued agents in `queue` and the total number of items in `queue.json`, including items without a session, in `queueSize`.
 
 ## state.json
 
