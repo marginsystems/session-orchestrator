@@ -178,18 +178,20 @@ function sidebarSessions(desktop) {
 }
 
 function desktopSessions() {
-  const out = new Map();
+  const out = Object.assign(new Map(), { available: false });
   let level1;
   try {
     level1 = readdirSync(DESKTOP_SESSIONS);
   } catch {
     return out;
   }
+  let complete = true;
   for (const a of level1) {
     let level2;
     try {
       level2 = readdirSync(join(DESKTOP_SESSIONS, a));
     } catch {
+      complete = false;
       continue;
     }
     for (const b of level2) {
@@ -197,6 +199,7 @@ function desktopSessions() {
       try {
         files = readdirSync(join(DESKTOP_SESSIONS, a, b));
       } catch {
+        complete = false;
         continue;
       }
       for (const f of files) {
@@ -206,6 +209,7 @@ function desktopSessions() {
         try {
           st = statSync(p);
         } catch {
+          complete = false;
           continue;
         }
         let rec = desktopCache.get(p);
@@ -222,6 +226,7 @@ function desktopSessions() {
       }
     }
   }
+  out.available = complete;
   return out;
 }
 
@@ -301,7 +306,7 @@ function readFocus(now, desktop) {
 }
 
 const sessionGone = (sid, desktop) => {
-  if (typeof sid !== 'string' || !sid || !desktop.size) return false;
+  if (typeof sid !== 'string' || !sid || !desktop.available) return false;
   const rec = sid.startsWith('local_') ? desktop.get(sid) : [...desktop.values()].find((r) => r.cli === sid);
   return sid.startsWith('local_') ? !rec || rec.archived === true : Boolean(rec && rec.archived);
 };
