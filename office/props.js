@@ -68,7 +68,7 @@ const pBookshelf = function (c, x, fy) {
   }
 };
 const noteProp = function (kind, x) {
-  if (curFloor) S.dyn.props.push({ id: curFloor.id, kind, x, cell: Math.round((x - zl()) / pitchOf(curFloor.id) - 0.5) });
+  if (curFloor) S.dyn.props.push({ id: curFloor.id, kind, x, row: curFloor.row, cell: curFloor.row * cellsFor(curFloor.id) + Math.round((x - zl()) / pitchOf(curFloor.id) - 0.5) });
 };
 const pCooler = function (c, x, fy) {
   noteProp('cooler', x);

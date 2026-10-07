@@ -107,7 +107,7 @@ const applyState = function (raw) {
   S.total = list.length;
   if (changed || !S.ready) layout();
   else { snapSeated(); if (recount) drawStatic(); }
-  if (reorder) beginAnim(oldFloors, added, ghosts, oldLH);
+  if (reorder) beginAnim(oldFloors, added, ghosts, oldLH, oldSlots);
   for (const a of joiners) spawn(joinTask(a));
   leavers.forEach((a, k) => spawn(k < 3 ? leaveTask(a) : fadeTask(a)));
   UI.dirty = true;

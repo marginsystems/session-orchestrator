@@ -132,7 +132,7 @@ async function staticChecks(page, tag) {
     check(l.y >= fl.top && l.y + l.h <= fl.foot, `${tag} label outside floor ${l.id}`);
   });
   const desksByFloor = {};
-  for (const k of d.desks) (desksByFloor[k.room] ||= []).push(k.x);
+  for (const k of d.desks) (desksByFloor[k.room + '|' + k.row] ||= []).push(k.x);
   for (const xs of Object.values(desksByFloor)) {
     xs.sort((a, b) => a - b);
     for (let i = 1; i < xs.length; i++) check(xs[i] - xs[i - 1] >= 40, `${tag} desks closer than a station`);
@@ -537,7 +537,7 @@ function writeDesktop(root, local, cli, extra = {}, account = 'acct') {
 }
 
 function makeCrowd(root) {
-  const projects = [['bulk', 12], ['p1', 5], ['p2', 5], ['p3', 5], ['p4', 5], ['p5', 5]];
+  const projects = [['bulk', 40], ['p1', 14], ['p2', 14], ['p3', 14], ['p4', 14], ['p5', 14]];
   const out = [];
   let age = 10;
   for (const [project, count] of projects) {
@@ -820,14 +820,14 @@ const crowdJob = async () => {
   const crowdServer = await startServer(home, CPORT);
   await serverReady(CPORT);
   let s = await stateOf(CPORT);
-  check(s.agents.length === 30, `crowd: expected the 30 session cap, got ${s.agents.length}`);
+  check(s.agents.length === 80, `crowd: expected the 80 session cap, got ${s.agents.length}`);
   check(!s.agents.some((a) => a.id === oldest.id), 'crowd: the oldest session was picked without focus');
   writeFileSync(focusFile, JSON.stringify({ sessionId: 'local_crowd1', at: new Date().toISOString() }));
   s = await waitState(CPORT, (st) => st.focus && st.focus.agentId);
   check(s.focus && s.focus.agentId === oldest.id, `crowd: local id mapped to ${s.focus && s.focus.agentId}`);
   check(s.agents.some((a) => a.id === oldest.id), 'crowd: focused agent missing from agents');
-  check(s.agents.length === 30, `crowd: focus changed the cap to ${s.agents.length}`);
-  check(s.agents.filter((a) => a.room === (s.agents.find((x) => x.id === oldest.id) || {}).room).length === 6, 'crowd: focus exceeded the per-room cap');
+  check(s.agents.length === 80, `crowd: focus changed the cap to ${s.agents.length}`);
+  check(s.agents.filter((a) => a.room === (s.agents.find((x) => x.id === oldest.id) || {}).room).length === 24, 'crowd: focus exceeded the per-room cap');
   check(!s.queue.includes('visitor'), 'crowd: queue contains a visitor');
   writeFileSync(focusFile, JSON.stringify({ sessionId: oldest.uuid, at: new Date().toISOString() }));
   s = await waitState(CPORT, (st) => st.focus && st.focus.agentId === oldest.id);
@@ -838,7 +838,7 @@ const crowdJob = async () => {
   writeFileSync(focusFile, JSON.stringify({ sessionId: randomUUID(), at: new Date().toISOString() }));
   s = await waitState(CPORT, (st) => st.focus && st.focus.agentId === 'visitor');
   check(s.focus && s.focus.agentId === 'visitor', 'crowd: unknown uuid did not stay visitor');
-  check(sessions.length > 30, 'crowd: fixture too small');
+  check(sessions.length > 80, 'crowd: fixture too small');
   say('crowd ok');
   crowdServer.kill();
   rmSync(home, { recursive: true, force: true });
@@ -1661,6 +1661,168 @@ add('behavior b0', ['behavior', 'ui'], () => behaviorRun(1280, 720, 'b0', 0, fal
 add('cooler c1280', ['behavior', 'ui', 'cooler'], () => coolerRun(1280, 720, 'c1280', 3, true), true);
 add('cooler c390', ['behavior', 'ui', 'cooler'], () => coolerRun(390, 844, 'c390', 3, true));
 add('cooler c0', ['behavior', 'ui', 'cooler'], () => coolerRun(1280, 720, 'c0', 0, false), true);
+const ROWS_SPEC = [['rbig', 'bigproj', 18], ['rmid', 'midproj', 7], ['rs1', 'small-a', 2], ['rs2', 'small-b', 1]];
+function rowsState(waitId) {
+  const rooms = ROWS_SPEC.map(([id, label]) => ({ id, label }));
+  const agents = [];
+  for (const [id, , n] of ROWS_SPEC) for (let i = 0; i < n; i++) agents.push({ id: `${id}_${i}`, name: `Fern${agents.length}`, room: id, state: `${id}_${i}` === waitId ? 'waiting' : 'working', since: `${id}_${i}` === waitId ? 1 : 0 });
+  const queue = waitId ? [waitId] : [];
+  return { rooms, agents, events: [], queue, queueSize: queue.length, line: queue, generatedAt: Date.now() };
+}
+const rowsSnap = (page) => ev(page, () => { const o = window.__office; return { fl: o.floors(), desks: o.desks(), grid: o.grid(), ag: o.agents(), w: o.world(), el: o.elevator(), hf: o.hf() }; });
+
+async function rowsRun(vw, vh, dpr, tag) {
+  const { ctx, page, errors } = await open(vw, vh, dpr, `file://${ROOT}/index.html?onboarding=0&chaos=0`, 900);
+  await ev(page, (st) => window.__office.load(st), rowsState(null));
+  await nap(page, 1500);
+  const d = await rowsSnap(page);
+  const per = Math.floor((d.w.w - 108) / 42);
+  for (const [id, , n] of ROWS_SPEC) {
+    const g = d.grid.find((x) => x.id === id), rows = Math.max(1, Math.ceil(n / per));
+    check(g.rows === rows && g.cols === Math.max(3, Math.ceil(n / rows)), `${tag} ${id} grid ${JSON.stringify(g)} for ${n} desks, ${per} per row`);
+  }
+  check(d.grid.find((x) => x.id === 'rbig').rows >= 2, `${tag} the 18-desk floor did not grow extra rows`);
+  check(d.desks.length === 28 && d.ag.filter((a) => !a.visitor).length === 28, `${tag} desks ${d.desks.length}`);
+  check(new Set(d.desks.map((k) => k.id)).size === 28, `${tag} an agent has two desks`);
+  const box = (k) => ({ x: k.x - 8, y: k.y - 25, w: 42, h: 35 });
+  d.desks.forEach((a, i) => d.desks.forEach((b, j) => { if (i < j) check(!hit(box(a), box(b)), `${tag} desks ${a.id} and ${b.id} overlap`); }));
+  for (const k of d.desks) {
+    const fl = d.fl.find((f) => f.id === k.room), b = box(k);
+    check(b.x >= 64 && b.x + b.w <= d.el.x - 13 && b.y >= fl.top && b.y + b.h <= fl.top + fl.h, `${tag} desk ${k.id} outside its floor box ${JSON.stringify(b)} vs ${JSON.stringify(fl)}`);
+    check(Math.abs(k.y - (fl.foot - k.row * 60)) < 0.01, `${tag} desk ${k.id} row ${k.row} not on its foot line`);
+    const a = d.ag.find((x) => x.id === k.id);
+    check(a && a.sit === 1 && Math.abs(a.x - k.x) < 0.01 && Math.abs(a.y - k.y) < 0.01, `${tag} agent ${k.id} not seated on its desk foot line`);
+  }
+  d.fl.forEach((f, i) => {
+    const g = d.grid.find((x) => x.id === f.id);
+    check(f.h === d.hf + ((g ? g.rows : 1) - 1) * 60, `${tag} floor ${f.id} height ${f.h}`);
+    if (i) check(f.top === d.fl[i - 1].top + d.fl[i - 1].h, `${tag} floor ${f.id} does not stack on the one above`);
+  });
+  const last = d.fl[d.fl.length - 1];
+  check(d.w.h === last.top + last.h + 8, `${tag} world height ${d.w.h} vs floors end ${last.top + last.h}`);
+  await staticChecks(page, tag + '-rows');
+  await crisp(page, tag + '-rows', d.w.w ? Math.round(await ev(page, () => window.__office.px())) : 1);
+
+  const scroll = await ev(page, () => { const st = document.getElementById('stage'), c = document.getElementById('cv'); return { sh: st.scrollHeight, ch: st.clientHeight, cssH: c.getBoundingClientRect().height, ov: getComputedStyle(st).overflowY }; });
+  check(scroll.ov === 'auto' && scroll.sh >= Math.floor(scroll.cssH), `${tag} stage cannot scroll the whole building (${JSON.stringify(scroll)})`);
+  if (scroll.cssH > scroll.ch + 1) {
+    const moved = await ev(page, () => { const st = document.getElementById('stage'); st.scrollTop = st.scrollHeight; return st.scrollTop; });
+    check(moved > 0, `${tag} stage did not scroll`);
+    const lastRect = await ev(page, () => { const r = document.getElementById('cv').getBoundingClientRect(); return { bottom: r.bottom, vh: innerHeight }; });
+    check(lastRect.bottom <= lastRect.vh + 1, `${tag} bottom of the building not reachable (${lastRect.bottom} > ${lastRect.vh})`);
+    await ev(page, () => { document.getElementById('stage').scrollTop = 0; });
+  }
+  await page.click('#gear');
+  await nap(page, 400);
+  check((await uiState(page)).settings, `${tag} gear did not open settings on the tall building`);
+  await page.keyboard.press('Escape');
+  await nap(page, 300);
+  check(!(await uiState(page)).settings, `${tag} settings did not close`);
+
+  const shotDir = process.env.SHOTS_ROWS || SHOTS;
+  mkdirSync(shotDir, { recursive: true });
+  await page.screenshot({ path: join(shotDir, `rows-${vw}x${vh}-dpr${dpr}-top.png`) });
+  await ev(page, () => { const st = document.getElementById('stage'); st.scrollTop = st.scrollHeight; });
+  await page.screenshot({ path: join(shotDir, `rows-${vw}x${vh}-dpr${dpr}-bottom.png`) });
+  await ev(page, () => { document.getElementById('stage').scrollTop = 0; });
+
+  const big = d.desks.filter((k) => k.room === 'rbig');
+  const deep = big.reduce((m, k) => (k.row > m.row ? k : m), big[0]);
+  check(deep.row >= 1, `${tag} no back-row desk to visit`);
+  const stops = [];
+  const watchCab = async () => {
+    const e = await ev(page, () => window.__office.elevator());
+    if (e.open > 0.95 && e.fy === Math.round(e.fy)) stops.push({ fy: e.fy, foot: e.foot });
+  };
+  await ev(page, (id) => window.__office.visit(id), deep.id);
+  let reached = false, returned = false;
+  for (let i = 0; i < 1800 && !returned; i++) {
+    await nap(page, 80);
+    await watchCab();
+    const s = await ev(page, (id) => ({ b: window.__office.bossActor(), a: window.__office.agents().find((x) => x.id === id) }), deep.id);
+    if (s.b.away && s.b.fr === 'rbig' && Math.abs(s.b.x - (deep.x - 17)) < 0.6 && Math.abs(s.b.y - deep.y) < 0.6 && s.b.bubble) reached = true;
+    if (s.b.away && s.b.fr === 'rbig' && !s.b.inCab) check(s.b.y <= d.fl.find((f) => f.id === 'rbig').foot + 0.5 && s.b.y >= deep.y - 0.5, `${tag} boss left the floor box at y ${s.b.y}`);
+    if (reached && !s.b.away) returned = true;
+  }
+  check(reached, `${tag} boss never reached the back-row desk`);
+  check(returned, `${tag} boss did not go back to the office`);
+  const boss = await ev(page, () => window.__office.bossActor());
+  check(Math.abs(boss.y - d.fl[0].foot) < 0.01 && boss.sit === 1, `${tag} boss not back on his own foot line`);
+
+  check(await ev(page, (id) => window.__office.trip('nobody', id, 'need eyes'), deep.id), `${tag} visitor trip to the back row refused`);
+  let vArrived = false, vGone = false, vStarted = false;
+  for (let i = 0; i < 1800 && !vGone; i++) {
+    await nap(page, 80);
+    await watchCab();
+    const v = await ev(page, () => window.__office.agents().find((a) => a.visitor));
+    if (v) {
+      vStarted = true;
+      if (v.bubble && !vArrived) { vArrived = true; check(Math.abs(v.x - (deep.x - 17)) < 0.6 && Math.abs(v.y - deep.y) < 0.6 && v.fr === 'rbig', `${tag} visitor not at the back-row desk (${v.x},${v.y}) vs (${deep.x - 17},${deep.y})`); }
+    } else if (vStarted) vGone = true;
+  }
+  check(vArrived && vGone, `${tag} visitor to the back row arrived=${vArrived} gone=${vGone}`);
+
+  await ev(page, (st) => window.__office.load(st), rowsState(deep.id));
+  const q = await settle(page, (id) => { const o = window.__office, a = o.agents().find((x) => x.id === id), qq = o.queue(); return !!a && a.queued && Math.abs(a.x - qq.spots[0]) < 0.6; }, deep.id, 80, 5);
+  check(q, `${tag} back-row agent never settled in the waiting room`);
+  const inRoom = await ev(page, (id) => ({ a: window.__office.agents().find((x) => x.id === id), q: window.__office.queue() }), deep.id);
+  check(Math.abs(inRoom.a.y - inRoom.q.foot) < 0.6 && inRoom.a.fr === '__boss', `${tag} queued back-row agent not on the boss foot line`);
+  await ev(page, (st) => window.__office.load(st), rowsState(null));
+  let home = false;
+  const mainFoot = d.fl.find((f) => f.id === 'rbig').foot;
+  for (let i = 0; i < 1800 && !home; i++) {
+    await nap(page, 80);
+    await watchCab();
+    const a = await ev(page, (id) => window.__office.agents().find((x) => x.id === id), deep.id);
+    if (a.fr === 'rbig' && a.away && !a.inCab) check(a.y <= mainFoot + 0.5 && a.y >= deep.y - 0.5, `${tag} returning agent left its floor box at y ${a.y}`);
+    if (!a.away) { home = true; check(Math.abs(a.x - deep.x) < 0.01 && Math.abs(a.y - deep.y) < 0.01 && a.sit === 1, `${tag} agent not on its back-row desk after the queue`); }
+  }
+  check(home, `${tag} queued back-row agent did not return to its desk`);
+  check(stops.length > 0, `${tag} elevator never opened on a floor`);
+  for (const sp of stops) {
+    const fl = d.fl[sp.fy];
+    check(fl && Math.abs(sp.foot - fl.foot) < 0.01, `${tag} elevator stopped at foot ${sp.foot}, floor ${sp.fy} foot is ${fl && fl.foot}`);
+  }
+  await staticChecks(page, tag + '-rows-end');
+  check(errors.length === 0, `${tag} rows console errors ${errors.join('|')}`);
+  await ctx.close();
+}
+
+async function rowsCoolerRun(vw, vh, tag) {
+  const { ctx, page, errors } = await open(vw, vh, 1, `file://${ROOT}/index.html?onboarding=0&chaos=3`, 600);
+  const info = await ev(page, () => {
+    const o = window.__office, ids = Array.from({ length: 20 }, (_, c) => 'cool' + c);
+    let n = 0;
+    for (let tries = 0; tries < 4; tries++) {
+      const per = Math.floor((o.world().w - 108) / 42);
+      if (per + 1 === n) break;
+      n = per + 1;
+      o.load({ rooms: ids.map((id) => ({ id, label: id })), agents: ids.flatMap((id) => Array.from({ length: n }, (_, i) => ({ id: id + '_' + i, name: 'Pip' + i, room: id, state: 'idle', since: 0 }))), events: [], generatedAt: Date.now() });
+    }
+    const backs = o.behavior().props.filter((p) => p.row === 1 && (p.kind === 'cooler' || p.kind === 'coffee'));
+    return { n, rows: o.grid().filter((g) => g.id[0] === 'c').map((g) => g.rows), backs: backs.length };
+  });
+  check(info.rows.every((r) => r === 2), `${tag} cooler floors not two rows ${JSON.stringify(info)}`);
+  check(info.backs > 0, `${tag} no back-row cooler or coffee machine on any of 20 floors`);
+  await nap(page, 1000);
+  let seen = 0, atCount = 0;
+  for (let i = 0; i < 400 && atCount < 3; i++) {
+    await adv(page, 1);
+    const s = await ev(page, () => { const o = window.__office; return { cool: o.behavior().cooler, desks: o.desks(), ag: o.agents(), fl: o.floors() }; });
+    for (const v of s.cool) {
+      const desk = s.desks.find((k) => k.id === v.key), a = s.ag.find((x) => x.id === v.key), fl = s.fl.find((f) => f.id === v.floor);
+      if (!desk || !a || !fl) continue;
+      seen++;
+      check(v.row === desk.row, `${tag} cooler visit on row ${v.row} by a row ${desk.row} agent`);
+      check(Math.abs(a.y - desk.y) < 0.6 && Math.abs(a.y - (fl.foot - v.row * 60)) < 0.6, `${tag} cooler visitor y ${a.y} not on its row foot ${fl.foot - v.row * 60}`);
+      if (v.phase === 'at') { atCount++; check(Math.abs(a.x - v.spot) < 0.6, `${tag} cooler visitor not at the cooler`); }
+    }
+  }
+  check(atCount >= 1, `${tag} no back-row cooler visit seen (${seen} samples)`);
+  check(errors.length === 0, `${tag} cooler rows console errors ${errors.join('|')}`);
+  await ctx.close();
+}
+
 async function runNoFlash() {
   const { ctx, page, errors } = await open(1280, 720, 1, `file://${ROOT}/index.html?onboarding=0`);
   const rooms = [{ id: 'f1', label: 'alpha' }, { id: 'f2', label: 'beta' }];
@@ -1687,6 +1849,8 @@ async function runNoFlash() {
   await ctx.close();
 }
 add('no flash', ['ui'], () => runNoFlash(), true);
+for (const dpr of [1, 2]) for (const [w, h] of [[1280, 720], [390, 844]]) add(`rows ${w}x${dpr}`, ['ui', 'rows'], () => rowsRun(w, h, dpr, `r${w}x${dpr}`), dpr === 1 && w === 390);
+for (const [w, h] of [[1280, 720], [390, 844]]) add(`rows cooler ${w}`, ['ui', 'rows', 'cooler'], () => rowsCoolerRun(w, h, `rc${w}`), w === 1280);
 for (const dpr of [1, 2]) for (const [w, h] of SIZES) add(`names ${w}x${dpr}`, ['ui'], () => runNames(w, h, dpr, `n${w}x${dpr}`), dpr === 1 && w === 1280);
 for (const dpr of [1, 2]) for (const [w, h] of SIZES) add(`ui ${w}x${dpr}`, ['ui'], () => runUi(w, h, dpr, `u${w}x${dpr}`), dpr === 1 && w === 1280);
 

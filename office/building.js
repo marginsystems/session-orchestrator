@@ -16,7 +16,7 @@ const stC = context2d(stCv);
 const speech = (text, t0, lift = 0) => ({ text, t0, lift });
 
 const newAgent = function (d) {
-  return { id: d.id, name: d.name, state: d.state, sleepy: !!d.sleepy, room: d.room, fr: d.room, slot: -1, x: 0, sit: 1, facing: 1, phase: 0, walking: false, away: false, q: false, title: d.title || '', inCab: false, alpha: 1, bubble: TYPE_ONLY ? speech('', 0) : null, gone: false, visitor: false, hop: 0, react: -9, seed: hash(d.id), st: styleFor(d.id), boss: false, spd: 0, joining: false, leaving: false };
+  return { id: d.id, name: d.name, state: d.state, sleepy: !!d.sleepy, room: d.room, fr: d.room, slot: -1, x: 0, dy: 0, sit: 1, facing: 1, phase: 0, walking: false, away: false, q: false, title: d.title || '', inCab: false, alpha: 1, bubble: TYPE_ONLY ? speech('', 0) : null, gone: false, visitor: false, hop: 0, react: -9, seed: hash(d.id), st: styleFor(d.id), boss: false, spd: 0, joining: false, leaving: false };
 };
 
 const BS = { react: -9, style: styleFor('boss', true) };
@@ -25,29 +25,51 @@ const BOSS_VISIT_TEXTS = ["HERE'S THE PLAN", "LET'S DO IT", 'GOT A MINUTE?'];
 const SEC_STYLE = { boss: false, fur: { o: '#7a2c3d', b: '#f4b6c2', s: '#d9778f', l: '#ffe5ea' }, acc: '#1a1c2c', ear: 'cat', accKind: 'glasses', screen: 0, key: 'secretary' };
 const SEC = { t0: -9, fake: { seed: 5, state: 'working', hop: 0, react: -9, sleepy: false, sit: 1, boss: true } };
 
-const newAnim = (t0, from, slide, out, keepH) => ({ t0, dur: out.length ? 0.9 : 0.8, from: new Map(from.map((id, i) => [id, i])), p: 0, pf: 0, ps: 0, slide, out, keepH });
+const newAnim = (t0, from, fromTops, slide, out, keepH) => ({ t0, dur: out.length ? 0.9 : 0.8, fromTop: new Map(from.map((id, i) => [id, fromTops[i]])), p: 0, pf: 0, ps: 0, slide, out, keepH });
 
-const S = { rooms: TYPE_ONLY ? [{ id: '', label: '', offAir: false }] : [], real: new Map(TYPE_ONLY ? [['', '']] : []), floors: [BOSS, LOBBY], agents: new Map(TYPE_ONLY ? [['', B]] : []), slots: new Map(TYPE_ONLY ? [['', ['']]] : []), Hf: 70, s: 2, dpr: 1, LW: 380, LH: 300, t: 0, dt: 0.07, dim: 0, sig: '', tally: '', layouts: 0, tasks: TYPE_ONLY ? [{ gen: wait(0), done: false }] : [], vid: 0, sky: 'day', counts: { working: 0, waiting: 0, idle: 0 }, msg: '', focus: TYPE_ONLY ? { token: '', agentId: '' } : null, frames: 0, dyn: { coffees: TYPE_ONLY ? [{ id: '', x: 0, dy: 0 }] : [], props: TYPE_ONLY ? [{ id: '', kind: '', x: 0, cell: 0 }] : [] }, set: { ...DEF_SET }, last: TYPE_ONLY ? { rooms: [{ id: '', label: '', offAir: false }] } : null, queue: TYPE_ONLY ? [''] : [], queueSize: 0, line: TYPE_ONLY ? ['', null] : [], want: TYPE_ONLY ? [''] : [], anim: TYPE_ONLY ? newAnim(0, [], [], [], 0) : null, fc: TYPE_ONLY ? new Map([['', stCv]]) : null, bgCv: TYPE_ONLY ? stCv : null, posting: 0, wall: new Map(), visits: TYPE_ONLY ? [''] : [], visitTarget: '', visitLog: TYPE_ONLY ? [{ id: '', agentAway: false, agentBubble: false, answered: false }] : [], drops: new Map(), puffs: TYPE_ONLY ? [{ x: 0, y: 0, t0: 0 }] : [], joined: new Set(), firstApplied: false, gotState: false, setReady: false, particles: TYPE_ONLY ? [{ x: 0, y: 0, vx: 0, vy: 0, col: '', life: 0, sz: 0 }] : [] };
+const S = { rooms: TYPE_ONLY ? [{ id: '', label: '', offAir: false }] : [], real: new Map(TYPE_ONLY ? [['', '']] : []), floors: [BOSS, LOBBY], tops: TYPE_ONLY ? [0] : [], hs: TYPE_ONLY ? [0] : [], agents: new Map(TYPE_ONLY ? [['', B]] : []), slots: new Map(TYPE_ONLY ? [['', ['']]] : []), Hf: 70, s: 2, dpr: 1, LW: 380, LH: 300, t: 0, dt: 0.07, dim: 0, sig: '', tally: '', layouts: 0, tasks: TYPE_ONLY ? [{ gen: wait(0), done: false }] : [], vid: 0, sky: 'day', counts: { working: 0, waiting: 0, idle: 0 }, msg: '', focus: TYPE_ONLY ? { token: '', agentId: '' } : null, frames: 0, dyn: { coffees: TYPE_ONLY ? [{ id: '', x: 0, dy: 0 }] : [], props: TYPE_ONLY ? [{ id: '', kind: '', x: 0, row: 0, cell: 0 }] : [] }, set: { ...DEF_SET }, last: TYPE_ONLY ? { rooms: [{ id: '', label: '', offAir: false }] } : null, queue: TYPE_ONLY ? [''] : [], queueSize: 0, line: TYPE_ONLY ? ['', null] : [], want: TYPE_ONLY ? [''] : [], anim: TYPE_ONLY ? newAnim(0, [], [], [], [], 0) : null, fc: TYPE_ONLY ? new Map([['', stCv]]) : null, bgCv: TYPE_ONLY ? stCv : null, posting: 0, wall: new Map(), visits: TYPE_ONLY ? [''] : [], visitTarget: '', visitLog: TYPE_ONLY ? [{ id: '', agentAway: false, agentBubble: false, answered: false }] : [], drops: new Map(), puffs: TYPE_ONLY ? [{ x: 0, y: 0, t0: 0 }] : [], joined: new Set(), firstApplied: false, gotState: false, setReady: false, particles: TYPE_ONLY ? [{ x: 0, y: 0, vx: 0, vy: 0, col: '', life: 0, sz: 0 }] : [] };
 const E = { fy: 0, open: 0, moving: false, queue: TYPE_ONLY ? [{ a: B, fromRoom: '', toRoom: '', state: '' }] : [], rider: TYPE_ONLY ? B : null, use: new Map(), ding: TYPE_ONLY ? { f: 0, t0: 0 } : null };
 
 const T0 = () => (HUD ? HUDH : 0) + ROOFH;
 const fIdxN = (id) => { const i = S.floors.indexOf(id); return i < 0 ? S.floors.length - 1 : i; };
-const fIdx = (id) => {
-  const i = fIdxN(id);
-  if (!S.anim) return i;
-  const f = S.anim.from.get(id);
-  return f === undefined ? i : lerp(f, i, S.anim.pf);
+const floorTop = (i) => S.tops[i];
+const footY = (i) => S.tops[i] + S.hs[i] - FB;
+const heightOf = (id) => S.hs[fIdxN(id)];
+const topNow = (id) => {
+  const t = S.tops[fIdxN(id)];
+  if (!S.anim) return t;
+  const f = S.anim.fromTop.get(id);
+  return f === undefined ? t : Math.round(lerp(f, t, S.anim.pf));
 };
-const floorTop = (i) => Math.round(T0() + i * S.Hf);
-const footY = (i) => floorTop(i) + S.Hf - FB;
+const footNow = (id) => topNow(id) + heightOf(id) - FB;
+const footAtIdx = (fi) => {
+  const last = S.tops.length - 1, i = clamp(Math.floor(fi), 0, last);
+  return lerp(footY(i), footY(Math.min(last, i + 1)), fi - i);
+};
 const EXC = () => S.LW - BM - 2 - SHAFT / 2;
 const zl = () => BM + LABW + 4;
 const zr = () => S.LW - BM - SHAFT - 8;
-const cellsFor = (rid) => Math.max(3, (S.slots.get(rid) || []).length);
+const gridFor = (n) => {
+  const per = Math.max(1, Math.floor((zr() - zl()) / MINP)), rows = Math.max(1, Math.ceil(n / per));
+  return { rows, cols: Math.max(3, Math.ceil(n / rows)) };
+};
+const gridOf = (rid, slots = S.slots) => gridFor((slots.get(rid) || []).length);
+const cellsFor = (rid) => gridOf(rid).cols;
 const pitchOf = (rid) => (zr() - zl()) / cellsFor(rid);
-const slotX = (rid, k) => Math.round(zl() + pitchOf(rid) * (k + 0.5) - 12);
+const slotRow = (rid, k) => Math.floor(k / cellsFor(rid));
+const deskDy = (rid, k) => slotRow(rid, k) * ROWH;
+const slotX = (rid, k) => { const cols = cellsFor(rid); return Math.round(zl() + ((zr() - zl()) / cols) * (k % cols + 0.5) - 12); };
+const deskFoot = (rid, k) => footNow(rid) - deskDy(rid, k);
+const floorHeight = (rid, slots = S.slots) => S.Hf + (gridOf(rid, slots).rows - 1) * ROWH;
+const geometry = function (ids, slots) {
+  const tops = [], hs = [];
+  let y = T0();
+  for (const id of ids) { const h = floorHeight(id, slots); tops.push(y); hs.push(h); y += h; }
+  return { tops, hs };
+};
+const bodyH = () => S.hs.reduce((sum, h) => sum + h, 0);
 const cabH = () => Math.min(38, S.Hf - FB - 10);
-const cabFoot = () => T0() + ((S.anim && E.fid && !E.moving ? fIdx(E.fid) : E.fy) + 1) * S.Hf - FB;
+const cabFoot = () => (S.anim && E.fid && !E.moving ? footNow(E.fid) : footAtIdx(E.fy));
 const bossX = () => Math.round(zl() + (zr() - zl()) * 0.26);
 const bossSpot = () => bossX() + 5 + BOSS_DESK_W + 10;
 const hallW = () => clamp(Math.floor((zr() - bossSpot() - 34) * 0.6), 100, 160);
@@ -60,12 +82,12 @@ const lineX = (k) => {
 };
 const slotOf = (id) => { const k = S.line.indexOf(id); return k >= 0 ? k : Math.max(0, S.want.indexOf(id)); };
 const secX = () => doorX() + 10;
-const yOf = (a) => (a.inCab ? Math.round(cabFoot()) : footY(fIdx(a.fr)));
+const yOf = (a) => (a.inCab ? Math.round(cabFoot()) : footNow(a.fr) - clamp(Math.round(a.dy), 0, (gridOf(a.fr).rows - 1) * ROWH));
 
 const snapSeated = function () {
   for (const a of S.agents.values()) {
     if (a.away || a.visitor || a.slot < 0) continue;
-    a.fr = a.room; a.x = slotX(a.room, a.slot); a.sit = 1; a.facing = 1; a.walking = false; a.hop = 0;
+    a.fr = a.room; a.x = slotX(a.room, a.slot); a.dy = deskDy(a.room, a.slot); a.sit = 1; a.facing = 1; a.walking = false; a.hop = 0;
   }
 };
 
@@ -80,8 +102,11 @@ const measure = function () {
   if (s > cap) s = Math.max(cap, Math.min(sW, sH));
   S.s = s; S.dpr = dpr;
   S.LW = clamp(Math.floor(devW / s), 340, MAXLW);
-  S.Hf = clamp(Math.floor((devH / s - t0 - GRND) / n), HF_MIN, HF_MAX);
-  S.LH = t0 + n * S.Hf + GRND;
+  const extra = S.floors.reduce((sum, id) => sum + (gridOf(id).rows - 1) * ROWH, 0);
+  S.Hf = clamp(Math.floor((devH / s - t0 - GRND - extra) / n), HF_MIN, HF_MAX);
+  const g = geometry(S.floors, S.slots);
+  S.tops = g.tops; S.hs = g.hs;
+  S.LH = t0 + bodyH() + GRND;
 };
 
 const layout = function () {
@@ -134,31 +159,40 @@ const labelLines = function (id) {
   return { rows, h: rows.length * 8 + 4 };
 };
 
-let curFloor = TYPE_ONLY ? { id: '', top: 0 } : null;
-const drawFloor = function (c, i, id, collect) {
-  curFloor = collect ? { id, top: floorTop(i) } : null;
-  const Hf = S.Hf, top = floorTop(i), fy = footY(i), BL = BM, BR = S.LW - BM, EX = EXC();
+let curFloor = TYPE_ONLY ? { id: '', top: 0, row: 0 } : null;
+const bayShell = function (c, bt, bh, id) {
+  const fy = bt + bh - FB, BL = BM, BR = S.LW - BM;
   const [wm, wd] = wallColors(id);
   const wl = mix(wm, '#ffffff', 0.1);
-  R(c, BL, top, BR - BL, fy - top, wm);
-  for (let y = top + 4; y < fy - 14; y += 4) for (let x = BL + (((y - top) >> 2) & 1) * 2; x < BR; x += 4) px(c, x, y, wl);
-  R(c, BL, top, BR - BL, 2, wd); R(c, BL, top + 2, BR - BL, 1, wl);
+  R(c, BL, bt, BR - BL, fy - bt, wm);
+  for (let y = bt + 4; y < fy - 14; y += 4) for (let x = BL + (((y - bt) >> 2) & 1) * 2; x < BR; x += 4) px(c, x, y, wl);
+  R(c, BL, bt, BR - BL, 2, wd); R(c, BL, bt + 2, BR - BL, 1, wl);
   R(c, BL, fy - 12, BR - BL, 12, wd); R(c, BL, fy - 12, BR - BL, 1, wl);
-  const bossFloor = id === BOSS, lobby = id === LOBBY;
-  R(c, BL, fy, BR - BL, Hf - (fy - top), bossFloor ? 'r' : 'j');
+  const bossFloor = id === BOSS;
+  R(c, BL, fy, BR - BL, bh - (fy - bt), bossFloor ? 'r' : 'j');
   if (bossFloor) { for (let x = BL; x < BR; x += 4) R(c, x, fy + 2, 2, 1, 'q'); R(c, BL, fy, BR - BL, 1, 'q'); }
   else {
     for (const yy of [fy + 3, fy + 7]) R(c, BL, yy, BR - BL, 1, 'k');
     for (let row = 0; row < 3; row++) for (let x = BL + row * 9; x < BR; x += 18) R(c, x, fy + 1 + row * 4 - (row ? 1 : 0), 1, 2, 'k');
   }
-  R(c, BL, top + Hf - 2, BR - BL, 2, 'i'); R(c, BL, top + Hf - 2, BR - BL, 1, 'g');
-  R(c, BL - 1, top, 1, Hf, 'f'); R(c, BR, top, 1, Hf, 'f');
-  R(c, EX - 13, top, SHAFT, Hf - 2, '0'); R(c, EX - 13, top, 1, Hf - 2, 'f'); R(c, EX + 12, top, 1, Hf - 2, 'f');
+  R(c, BL, bt + bh - 2, BR - BL, 2, 'i'); R(c, BL, bt + bh - 2, BR - BL, 1, 'g');
+  R(c, BL - 1, bt, 1, bh, 'f'); R(c, BR, bt, 1, bh, 'f');
+};
+
+const drawFloor = function (c, id, top, collect) {
+  curFloor = collect ? { id, top, row: 0 } : null;
+  const grid = gridOf(id), H = floorHeight(id), fy = top + S.Hf - FB, BL = BM, EX = EXC();
+  const [wm, wd] = wallColors(id);
+  const wl = mix(wm, '#ffffff', 0.1);
+  bayShell(c, top, S.Hf, id);
+  for (let r = grid.rows - 2; r >= 0; r--) bayShell(c, top + H - (r + 1) * ROWH, ROWH, id);
+  const bossFloor = id === BOSS, lobby = id === LOBBY;
+  R(c, EX - 13, top, SHAFT, H - 2, '0'); R(c, EX - 13, top, 1, H - 2, 'f'); R(c, EX + 12, top, 1, H - 2, 'f');
   const lines = labelLines(id);
   R(c, BL + 1, top + 4, LABW - 2, lines.h, 'i'); R(c, BL + 1, top + 4, LABW - 2, 1, 'h'); R(c, BL + 1, top + 3 + lines.h, LABW - 2, 1, 'n');
   lines.rows.forEach((r, j) => text(c, r.t, BL + 3, top + 7 + j * 8 + (r.sm ? 1 : 0), r.col, r.sm));
   const arr = S.slots.get(id) || [];
-  const ncell = cellsFor(id), pitch = pitchOf(id), L = zl();
+  const ncell = grid.cols, pitch = pitchOf(id), L = zl();
   const rr = rng(hash(id) + 11);
   const wallH = fy - top;
   if (lobby) {
@@ -188,25 +222,30 @@ const drawFloor = function (c, i, id, collect) {
   }
   const order = lobby ? ['reception', 'plant', 'sofa', 'bigplant', 'cooler', 'plant'] : ['bookshelf', 'cooler', 'coffee', 'plant', 'printer', 'lamp', 'bigplant', 'cactus'];
   let pi = Math.floor(rr() * order.length);
-  for (let k = 0; k < ncell; k++) {
-    const cx = L + pitch * (k + 0.5);
-    const aid = arr[k], a = aid && S.agents.get(aid);
-    const ww = Math.min(26, Math.floor(pitch) - 10);
-    windowAt(c, Math.round(cx - ww / 2), top + 6, ww, 12, hash(id) + k * 7);
-    const free = fy - 25 - (top + 22);
-    if (pitch >= 70 && k < ncell - 1) { const ex = Math.round(cx + pitch / 2), kd = (k + hash(id)) % 3; if (kd === 0) pBoard(c, ex, top + 24); else if (kd === 1) pPoster(c, ex, top + 22, k % 3); else pClock(c, ex, top + 26); }
-    if (a && a.joining) continue;
-    if (a) {
-      drawStation(c, slotX(id, k), fy, a);
-      if (free >= 15) { const kind = (k + hash(id)) % 4; if (kind === 3) pClock(c, Math.round(cx + 12), top + 24); else pPoster(c, Math.round(cx + 12), top + 24 + Math.floor((free - 15) / 2), kind); }
-      const gap = pitch / 2 - 21;
-      if (gap >= 12) BIG[SMALL[(k + pi) % SMALL.length]](c, Math.round(cx + 21 + gap / 2), fy);
-    } else {
-      const kind = order[pi % order.length]; pi++;
-      BIG[kind](c, Math.round(cx), fy);
-      const w = PROP_W[kind];
-      if (pitch - w >= 28) BIG[SMALL[pi % SMALL.length]](c, Math.round(cx + w / 2 + 9), fy);
-      if (free >= 15) { if (kind === 'bookshelf') pBoard(c, Math.round(cx), top + 24); else if (k % 2) pPoster(c, Math.round(cx), top + 24 + Math.floor((free - 15) / 2), (k + 1) % 3); else if (kind !== 'lamp') pBoard(c, Math.round(cx), top + 24 + Math.floor((free - 14) / 2)); }
+  for (let r = grid.rows - 1; r >= 0; r--) {
+    const bt = r === grid.rows - 1 ? top : top + H - (r + 1) * ROWH, rfy = top + H - FB - r * ROWH;
+    if (curFloor) curFloor.row = r;
+    const free = rfy - 25 - (bt + 22);
+    for (let col = 0; col < ncell; col++) {
+      const k = r * ncell + col;
+      const cx = L + pitch * (col + 0.5);
+      const aid = arr[k], a = aid && S.agents.get(aid);
+      const ww = Math.min(26, Math.floor(pitch) - 10);
+      windowAt(c, Math.round(cx - ww / 2), bt + 6, ww, 12, hash(id) + k * 7);
+      if (pitch >= 70 && col < ncell - 1) { const ex = Math.round(cx + pitch / 2), kd = (k + hash(id)) % 3; if (kd === 0) pBoard(c, ex, bt + 24); else if (kd === 1) pPoster(c, ex, bt + 22, k % 3); else pClock(c, ex, bt + 26); }
+      if (a && a.joining) continue;
+      if (a) {
+        drawStation(c, slotX(id, k), rfy, a);
+        if (free >= 15) { const kind = (k + hash(id)) % 4; if (kind === 3) pClock(c, Math.round(cx + 12), bt + 24); else pPoster(c, Math.round(cx + 12), bt + 24 + Math.floor((free - 15) / 2), kind); }
+        const gap = pitch / 2 - 21;
+        if (gap >= 12) BIG[SMALL[(k + pi) % SMALL.length]](c, Math.round(cx + 21 + gap / 2), rfy);
+      } else {
+        const kind = order[pi % order.length]; pi++;
+        BIG[kind](c, Math.round(cx), rfy);
+        const w = PROP_W[kind];
+        if (pitch - w >= 28) BIG[SMALL[pi % SMALL.length]](c, Math.round(cx + w / 2 + 9), rfy);
+        if (free >= 15) { if (kind === 'bookshelf') pBoard(c, Math.round(cx), bt + 24); else if (k % 2) pPoster(c, Math.round(cx), bt + 24 + Math.floor((free - 15) / 2), (k + 1) % 3); else if (kind !== 'lamp') pBoard(c, Math.round(cx), bt + 24 + Math.floor((free - 14) / 2)); }
+      }
     }
   }
 };
@@ -235,13 +274,13 @@ const drawHud = function (c) {
 };
 
 const drawBg = function (c) {
-  const W = S.LW, H = S.LH, t0 = T0(), n = S.floors.length;
+  const W = S.LW, H = S.LH, t0 = T0();
   c.clearRect(0, 0, W, H);
   R(c, 0, 0, W, H, S.sky === 'day' ? '#41a6f6' : S.sky === 'dusk' ? '#b13e53' : '#29366f');
   if (S.sky === 'night') { const r = rng(9); for (let i = 0; i < 24; i++) px(c, Math.floor(r() * W), Math.floor(r() * (t0 + 20)), r() < 0.3 ? '4' : 'c'); R(c, 20, t0 - 8, 5, 5, '4'); px(c, 22, t0 - 8, '#29366f'); }
   else if (S.sky === 'day') { blob(c, 38, t0 - 4, 7, 2, 'c'); blob(c, W - 60, t0 - 8, 6, 2, 'c'); R(c, W - 18, t0 - 9, 6, 6, '4'); }
   else R(c, 30, t0 - 7, 7, 7, '4');
-  const bBot = t0 + n * S.Hf;
+  const bBot = t0 + bodyH();
   R(c, 0, bBot, W, GRND, '6'); R(c, 0, bBot, W, 1, '5'); R(c, 0, bBot + 3, W, GRND - 3, '7');
   for (let x = 3; x < W; x += 9) px(c, x, bBot + 1, '5');
   R(c, BM - 3, t0 - 3, W - 2 * BM + 6, 3, 'f'); R(c, BM - 3, t0 - 3, W - 2 * BM + 6, 1, 'e');
@@ -251,9 +290,9 @@ const drawBg = function (c) {
   if (HUD) drawHud(c);
 };
 
-const drawFloorFull = function (c, i, id, collect) {
-  drawFloor(c, i, id, collect);
-  const ch = cabH(), EX = EXC(), fy = footY(i);
+const drawFloorFull = function (c, id, top, collect) {
+  drawFloor(c, id, top, collect);
+  const ch = cabH(), EX = EXC(), fy = top + floorHeight(id) - FB;
   R(c, EX - 13, fy - ch - 4, SHAFT, 3, 'e'); R(c, EX - 13, fy - ch - 4, SHAFT, 1, 'd'); R(c, EX - 4, fy - ch - 3, 8, 1, 'f'); R(c, EX - 13, fy, SHAFT, 1, 'd');
 };
 
@@ -261,23 +300,23 @@ const drawStatic = function () {
   S.dyn = { coffees: [], props: [] };
   S.sky = skyMode();
   drawBg(stC);
-  S.floors.forEach((id, i) => drawFloorFull(stC, i, id, true));
+  S.floors.forEach((id, i) => drawFloorFull(stC, id, S.tops[i], true));
 };
 
-const floorCanvas = function (i, id) {
+const floorCanvas = function (id, top) {
   const f = document.createElement('canvas');
-  f.width = S.LW; f.height = S.Hf;
+  f.width = S.LW; f.height = floorHeight(id);
   const c = context2d(f);
   c.imageSmoothingEnabled = false;
-  c.translate(0, -floorTop(i));
-  drawFloorFull(c, i, id, false);
+  c.translate(0, -top);
+  drawFloorFull(c, id, top, false);
   return f;
 };
 
 const ghostCanvas = function (g) {
   const sr = S.rooms, ss = S.slots, sw = S.wall;
   S.rooms = [...sr, { id: g.id, label: g.label, offAir: false }]; S.slots = new Map(ss).set(g.id, g.slots); S.wall = new Map(sw).set(g.id, g.wall);
-  try { return floorCanvas(g.i, g.id); } finally { S.rooms = sr; S.slots = ss; S.wall = sw; }
+  try { return floorCanvas(g.id, g.top); } finally { S.rooms = sr; S.slots = ss; S.wall = sw; }
 };
 
 const setCanvasH = function (h) {
@@ -286,7 +325,7 @@ const setCanvasH = function (h) {
   ctx.imageSmoothingEnabled = false;
 };
 
-const beginAnim = function (old, added, ghosts, oldLH) {
+const beginAnim = function (old, added, ghosts, oldLH, oldSlots) {
   const keepH = Math.max(S.LH, oldLH || 0);
   if (keepH > S.LH) setCanvasH(keepH);
   const bg = document.createElement('canvas');
@@ -294,12 +333,13 @@ const beginAnim = function (old, added, ghosts, oldLH) {
   const bc = context2d(bg);
   bc.imageSmoothingEnabled = false;
   drawBg(bc);
-  R(bc, BM, T0(), S.LW - 2 * BM, S.floors.length * S.Hf, '#1a1c2c');
+  R(bc, BM, T0(), S.LW - 2 * BM, bodyH(), '#1a1c2c');
   S.bgCv = bg;
-  S.fc = new Map(S.floors.map((id, i) => [id, floorCanvas(i, id)]));
+  S.fc = new Map(S.floors.map((id, i) => [id, floorCanvas(id, S.tops[i])]));
+  const oldTops = geometry(old, oldSlots).tops;
   const slide = new Set((added || []).filter((id) => (S.slots.get(id) || []).every((aid) => !aid || (S.agents.get(aid) || {}).joining)));
   S.animCount = (S.animCount || 0) + 1;
-  const out = (ghosts || []).map((g) => ({ i: g.i, cv: ghostCanvas(g) }));
-  S.anim = newAnim(S.t, old, slide, out, keepH);
+  const out = (ghosts || []).map((g) => ({ top: oldTops[g.i], cv: ghostCanvas({ ...g, top: oldTops[g.i] }) }));
+  S.anim = newAnim(S.t, old, oldTops, slide, out, keepH);
   draw(S.t);
 };

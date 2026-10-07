@@ -9,7 +9,7 @@ const AUTOFOCUS = Q.get('autofocus') !== '0';
 const SIM = Q.get('sim') !== '0';
 const ONBOARDING = Q.get('onboarding');
 
-const MINLW = 370, MAXLW = 560, HUDH = 14, ROOFH = 12, GRND = 8, HF_MIN = 64, HF_MAX = 84, BM = 6, LABW = 58, SHAFT = 26, FB = 11, MAXS = 6;
+const MINLW = 370, MAXLW = 560, HUDH = 14, ROOFH = 12, GRND = 8, HF_MIN = 64, HF_MAX = 84, BM = 6, LABW = 58, SHAFT = 26, FB = 11, MAXS = 24, ROWH = 60, MINP = 42;
 const LOBBY = '__lobby', BOSS = '__boss', DESK_W = 28, BOSS_DESK_W = 46, VIS_DX = 17;
 const TEXTS = ['GOT A SEC?', "PR'S UP", 'HANDING OFF', 'NEED EYES', 'DONE!'];
 const BOSS_TEXTS = ['GOT A DECISION', 'NEED A CALL', 'UPDATE!'];

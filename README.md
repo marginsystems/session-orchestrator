@@ -63,7 +63,7 @@ node scan.mjs --once --json   # prints the state.json snapshot
 node scan.mjs --ensure        # starts the server in the background if it is not running
 ```
 
-Flags: `--port <n>`, `--anonymize-rooms` (rooms become Room A, B, C, for screen recordings), `--show-titles` (shows session titles as name tags above the critters), `--max <n>` (agent cap, default 30; at most 6 agents per room and 12 rooms).
+Flags: `--port <n>`, `--anonymize-rooms` (rooms become Room A, B, C, for screen recordings), `--show-titles` (shows session titles as name tags above the critters), `--max <n>` (agent cap, default 80; at most 24 agents per room and 12 rooms).
 
 Floors are named after the GitHub repository, or the folder when there is no remote. Session titles are hidden unless you opt in.
 
@@ -157,7 +157,7 @@ Sessions are the ones your Claude Code sidebar lists: when the Claude desktop ap
 
 - Tested on macOS only. Transcripts are read from `~/.claude/projects` on any OS, but the Claude desktop app session metadata is read from `~/Library/Application Support/Claude`, so on Linux and Windows cross-session senders show as visitors, `local_...` ids in `focus.json` do not resolve, and session titles are unavailable.
 - `local_...` session ids exist only for sessions started in the Claude desktop app. For a terminal session, write its transcript uuid to `focus.json` instead.
-- At most 30 agents, 6 per floor and 12 floors are shown (`--max` raises the agent cap only). Without the desktop app's session metadata, only transcripts changed in the last 7 days count.
+- At most 80 agents, 24 per floor and 12 floors are shown (`--max` raises the agent cap only). Without the desktop app's session metadata, only transcripts changed in the last 7 days count.
 - The office is a browser tab on `127.0.0.1:7777`; `/office` always uses that port. There is no in-app pane yet.
 - No sound yet.
 

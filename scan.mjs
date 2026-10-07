@@ -21,7 +21,7 @@ const OPTS = {
   port: Number(opt('--port', '7777')),
   anonymize: flag('--anonymize-rooms'),
   titles: flag('--show-titles'),
-  max: Number(opt('--max', '30')),
+  max: Number(opt('--max', '80')),
 };
 
 const DATA_DIR = join(homedir(), '.session-orchestrator');
@@ -42,7 +42,7 @@ const SLEEPY_MS = 30 * 60 * 1000;
 const EVENT_MS = 10 * 60 * 1000;
 const TAIL_BYTES = 400 * 1024;
 const HEAD_BYTES = 128 * 1024;
-const MAX_PER_ROOM = 6;
+const MAX_PER_ROOM = 24;
 const MAX_ROOMS = 12;
 
 const NAMES = [

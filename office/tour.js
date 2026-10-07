@@ -99,15 +99,15 @@ const tourSummon = function* (tok) {
 const tourRects = function () {
   const T = UI.tour;
   if (!T) return [];
-  if (T.step === 0) { const bx = bossX(), fy = footY(fIdx(BOSS)); return [{ x: bx - 15, y: fy - 40, w: 80, h: 42 }]; }
+  if (T.step === 0) { const bx = bossX(), fy = footY(0); return [{ x: bx - 15, y: fy - 40, w: 80, h: 42 }]; }
   if (T.step === 1 && S.rooms.length) {
-    const rid = S.rooms[0].id, top = floorTop(fIdx(rid)), fy = footY(fIdx(rid));
+    const rid = S.rooms[0].id, top = topNow(rid), fy = footNow(rid);
     const out = [{ x: BM, y: top + 2, w: LABW, h: labelLines(rid).h + 4 }];
     const first = (S.slots.get(rid) || [])[0];
     if (first) out.push({ x: slotX(rid, 0) - 11, y: fy - 36, w: 48, h: 38 });
     return out;
   }
-  if (T.step === 4) { const top = floorTop(fIdx(BOSS)), fy = footY(fIdx(BOSS)); return [{ x: doorX() - 2, y: top + 9, w: hallW() + 2, h: fy - top - 6 }]; }
+  if (T.step === 4) { const top = floorTop(0), fy = footY(0); return [{ x: doorX() - 2, y: top + 9, w: hallW() + 2, h: fy - top - 6 }]; }
   return [];
 };
 

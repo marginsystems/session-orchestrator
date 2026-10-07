@@ -53,10 +53,11 @@ raf = requestAnimationFrame(frame);
 
 window['__office'] = {
   scale: () => S.s / S.dpr, px: () => S.s, hf: () => S.Hf, dpr: () => S.dpr, frames: () => S.frames, world: () => ({ w: S.LW, h: S.LH }),
-  floors: () => S.floors.map((id, i) => ({ id, top: floorTop(i), foot: footY(i), y: floorTop(fIdx(id)) })),
+  floors: () => S.floors.map((id, i) => ({ id, top: floorTop(i), foot: footY(i), h: S.hs[i], y: topNow(id) })),
+  grid: () => S.floors.map((id) => ({ id, ...gridOf(id), rowH: ROWH, minPitch: MINP })),
   labels: () => S.floors.map((id, i) => labelLines(id).rows.map((r, j) => ({ id, x: BM + 3, y: floorTop(i) + 7 + j * 8 + (r.sm ? 1 : 0), w: fitW(r.t, r.sm), h: r.sm ? 5 : 7, t: r.t, sm: !!r.sm }))).flat(),
-  desks: () => { const o = []; for (const [rid, arr] of S.slots) arr.forEach((aid, k) => { if (aid) o.push({ id: aid, room: rid, x: slotX(rid, k), y: footY(fIdx(rid)) }); }); return o; },
-  agents: () => [...S.agents.values()].map((a) => ({ id: a.id, name: a.name, state: a.state, room: a.room, fr: a.fr, x: a.x, y: yOf(a), sit: a.sit, away: a.away, queued: a.q && a.fr === BOSS && !a.walking && !a.inCab, settled: settledAway(a), q: a.q, title: a.title, walking: a.walking, facing: a.facing, inCab: a.inCab, visitor: a.visitor, gone: a.gone, leaving: !!a.leaving, alpha: a.alpha, bubble: a.bubble ? bubbleRect(a) : null })),
+  desks: () => { const o = []; for (const [rid, arr] of S.slots) arr.forEach((aid, k) => { if (aid) o.push({ id: aid, room: rid, k, row: slotRow(rid, k), x: slotX(rid, k), y: deskFoot(rid, k) }); }); return o; },
+  agents: () => [...S.agents.values()].map((a) => ({ id: a.id, name: a.name, state: a.state, room: a.room, fr: a.fr, x: a.x, y: yOf(a), dy: a.dy, sit: a.sit, away: a.away, queued: a.q && a.fr === BOSS && !a.walking && !a.inCab, settled: settledAway(a), q: a.q, title: a.title, walking: a.walking, facing: a.facing, inCab: a.inCab, visitor: a.visitor, gone: a.gone, leaving: !!a.leaving, alpha: a.alpha, bubble: a.bubble ? bubbleRect(a) : null })),
   elevator: () => ({ fy: E.fy, open: E.open, queue: E.queue.length, rider: E.rider ? E.rider.id : null, x: EXC(), foot: cabFoot(), h: cabH() }),
   boss: () => ({ x: bossX(), foot: footY(0), spot: bossSpot(), desk: { x: bossX() - 12, y: footY(0) - 25, w: BOSS_DESK_W + 17, h: 25 }, floor: BOSS }),
   focus: (id, at) => { setFocus(id, at || String(Date.now())); return true; },

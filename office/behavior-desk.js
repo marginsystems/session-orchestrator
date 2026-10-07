@@ -25,15 +25,15 @@ const claimCooler = function (a) {
   return true;
 };
 
-const coolerProps = (floor) => S.dyn.props.filter((p) => p.id === floor && (p.kind === 'cooler' || p.kind === 'coffee'));
-const propNow = (v) => S.dyn.props.find((p) => p.id === v.floor && p.kind === v.prop.kind && p.x === v.prop.x) || null;
-const visitorsAt = (prop, floor) => [...BH.visits.values()].filter((v) => !v.dead && v.floor === floor && v.prop.x === prop.x && v.phase !== 'back');
+const coolerProps = (floor, row) => S.dyn.props.filter((p) => p.id === floor && p.row === row && (p.kind === 'cooler' || p.kind === 'coffee'));
+const propNow = (v) => S.dyn.props.find((p) => p.id === v.floor && p.row === v.prop.row && p.kind === v.prop.kind && p.x === v.prop.x) || null;
+const visitorsAt = (prop, floor) => [...BH.visits.values()].filter((v) => !v.dead && v.floor === floor && v.prop.row === prop.row && v.prop.x === prop.x && v.phase !== 'back');
 const settledAt = (prop, floor) => visitorsAt(prop, floor).filter((v) => v.phase === 'at');
 
 const needed = (a) => a.state !== 'idle' || a.sleepy || a.q || a.gone || a.leaving || a.slot < 0 || a.joining
   || !!(S.focus && S.focus.agentId === a.id) || S.visits.includes(a.id) || S.visitTarget === a.id;
 
-const bossNear = (floor, x) => B.away && !B.inCab && B.fr === floor && Math.abs(B.x - x) < COOLER_NEAR;
+const bossNear = (floor, x, dy) => B.away && !B.inCab && B.fr === floor && Math.abs(B.dy - dy) < 2 && Math.abs(B.x - x) < COOLER_NEAR;
 
 const dismissed = (v) => needed(v.a) || quiet() || v.a.room !== v.floor || !propNow(v);
 
@@ -109,7 +109,7 @@ const ruleCooler = function (m, c) {
   if (!a || !S.dyn.props.length || a.state !== 'idle' || a.sleepy || m.trip > S.t || m.doze > S.t || m.busy > S.t || napping(a)) return null;
   if (a.away || a.q || a.joining || a.leaving || a.gone || BH.visits.has(a.id) || S.visits.includes(a.id) || S.visitTarget === a.id) return null;
   if (S.focus && S.focus.agentId === a.id) return null;
-  const open = coolerProps(c.floor).filter((p) => visitorsAt(p, c.floor).length < COOLER_MAX);
+  const open = coolerProps(c.floor, slotRow(c.floor, m.slot)).filter((p) => visitorsAt(p, c.floor).length < COOLER_MAX);
   if (!open.length) return null;
   const social = open.filter((p) => settledAt(p, c.floor).length > 0);
   const pool = social.length ? social : open;
@@ -120,20 +120,20 @@ const ruleCooler = function (m, c) {
 
 const ruleBossWake = function (m) {
   const a = m.actor;
-  if (!a || !bossNear(a.fr, a.x)) return null;
+  if (!a || !bossNear(a.fr, a.x, a.dy)) return null;
   const chatting = activePose(m) && !!m.pose && m.pose.kind === 'chat';
   return napping(a) || chatting ? newIntent('wake', {}) : null;
 };
 
 const ruleBossScatter = function (m) {
   const v = BH.visits.get(m.key);
-  if (!v || v.dead || v.scare || v.phase !== 'at' || !bossNear(v.floor, v.a.x)) return null;
+  if (!v || v.dead || v.scare || v.phase !== 'at' || !bossNear(v.floor, v.a.x, v.a.dy)) return null;
   return newIntent('scatter', {});
 };
 
 const chatBeside = function (a, m, floor) {
-  for (const p of coolerProps(floor)) if (Math.abs(p.cell - m.slot) === 1 && settledAt(p, floor).length >= 2) return true;
-  for (const n of BH.speaking) if (n !== m && n.actor && n.actor.fr === a.fr && n.bubble && n.bubble.text !== 'SHH' && Math.abs(moodX(n) - a.x) < COOLER_NEAR) return true;
+  for (const p of coolerProps(floor, slotRow(floor, m.slot))) if (Math.abs(p.cell - m.slot) === 1 && settledAt(p, floor).length >= 2) return true;
+  for (const n of BH.speaking) if (n !== m && n.actor && n.actor.fr === a.fr && Math.abs(n.actor.dy - a.dy) < 1 && n.bubble && n.bubble.text !== 'SHH' && Math.abs(moodX(n) - a.x) < COOLER_NEAR) return true;
   return false;
 };
 
@@ -181,5 +181,5 @@ const tickCoolers = function () {
   }
 };
 
-const coolerSnapshot = () => [...BH.visits.values()].map((v) => ({ key: v.a.id, floor: v.floor, phase: v.phase, side: v.side, x: v.a.x, spot: v.x, prop: v.prop.kind, propX: v.prop.x, scare: v.scare }));
+const coolerSnapshot = () => [...BH.visits.values()].map((v) => ({ key: v.a.id, floor: v.floor, phase: v.phase, side: v.side, x: v.a.x, spot: v.x, prop: v.prop.kind, propX: v.prop.x, scare: v.scare, row: v.prop.row }));
 const propSnapshot = () => S.dyn.props.map((p) => ({ ...p }));

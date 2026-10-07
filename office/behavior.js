@@ -32,7 +32,7 @@ const BH = {
   desk: TYPE_ONLY ? [NOMOOD] : [],
   speaking: TYPE_ONLY ? [newMood('', B, -1)] : [],
   log: TYPE_ONLY ? [{ t: 0, key: '', slot: 0, state: '', act: '', chain: 0, root: '', from: '', text: '' }] : [],
-  visits: new Map(TYPE_ONLY ? [['', newVisit(B, newMood('', B, -1), { id: '', kind: '', x: 0, cell: 0 }, 0)]] : []),
+  visits: new Map(TYPE_ONLY ? [['', newVisit(B, newMood('', B, -1), { id: '', kind: '', x: 0, row: 0, cell: 0 }, 0)]] : []),
   batch: { t: -9, ranks: new Map(TYPE_ONLY ? [['', 0]] : []) },
 };
 
@@ -233,20 +233,23 @@ const tickDesks = function () {
   const D = BH.desk;
   for (const [rid, ids] of S.slots) {
     if (!S.floors.includes(rid)) continue;
-    D.length = 0;
     CTX.floor = rid;
-    ids.forEach((id, k) => {
-      const a = id ? S.agents.get(id) : null;
-      const m = a && deskSeated(a, k) ? moodFor(a.id, a, -1) : NOMOOD;
-      if (m) m.slot = k;
-      D.push(m);
-    });
-    for (let i = 0; i < D.length; i++) {
-      const m = D[i];
-      if (!m) continue;
-      if (m.doze > 0 && !napping(m.actor || B)) m.doze = 0;
-      const it = runRules(m, fillCtx(D, i, m, 'desk'), 'tick');
-      if (it) DO[it.kind](m, it);
+    const cols = cellsFor(rid);
+    for (let from = 0; from < ids.length; from += cols) {
+      D.length = 0;
+      ids.slice(from, from + cols).forEach((id, j) => {
+        const a = id ? S.agents.get(id) : null;
+        const m = a && deskSeated(a, from + j) ? moodFor(a.id, a, -1) : NOMOOD;
+        if (m) m.slot = from + j;
+        D.push(m);
+      });
+      for (let i = 0; i < D.length; i++) {
+        const m = D[i];
+        if (!m) continue;
+        if (m.doze > 0 && !napping(m.actor || B)) m.doze = 0;
+        const it = runRules(m, fillCtx(D, i, m, 'desk'), 'tick');
+        if (it) DO[it.kind](m, it);
+      }
     }
   }
 };
@@ -300,7 +303,7 @@ const waiterPose = function (m) {
 };
 
 const drawBehaviorBubbles = function () {
-  for (const m of BH.speaking) if (m.bubble) drawBubble({ x: moodX(m), fr: m.actor && m.guest < 0 ? m.actor.fr : BOSS, inCab: false, bubble: m.bubble });
+  for (const m of BH.speaking) if (m.bubble) drawBubble({ x: moodX(m), fr: m.actor && m.guest < 0 ? m.actor.fr : BOSS, dy: m.actor && m.guest < 0 ? m.actor.dy : 0, inCab: false, bubble: m.bubble });
 };
 
 const behaviorSnapshot = function () {

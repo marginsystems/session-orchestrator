@@ -150,7 +150,7 @@ const drawDrops = function () {
   for (const [id, d] of S.drops) {
     const a = S.agents.get(id);
     if (!a) continue;
-    const p = clamp((S.t - d.t0) / 0.38, 0, 1), fy = footY(fIdx(a.room));
+    const p = clamp((S.t - d.t0) / 0.38, 0, 1), fy = deskFoot(a.room, a.slot);
     if (!d.cv) { d.cv = document.createElement('canvas'); d.cv.width = 48; d.cv.height = 48; drawStation(context2d(d.cv), 10, 34, a); }
     const off = -Math.round((1 - p * p) * 30);
     ctx.drawImage(d.cv, slotX(a.room, a.slot) - 10, fy - 34 + off);
@@ -180,7 +180,7 @@ const drawGuests = function (t) {
 };
 
 const drawQueueMarks = function () {
-  const fy = footY(fIdx(BOSS)), roomy = S.line.length < 2 || lineX(1) - lineX(0) >= 12;
+  const fy = footY(0), roomy = S.line.length < 2 || lineX(1) - lineX(0) >= 12;
   S.line.forEach((id, k) => {
     if (k > 0 && !roomy) return;
     const a = id ? S.agents.get(id) : null;
@@ -233,7 +233,7 @@ const placeGear = function () {
 };
 
 const drawSecretary = function (t) {
-  const fy = footY(fIdx(BOSS)), x = secX(), waving = S.t - SEC.t0 < 1.4;
+  const fy = footY(0), x = secX(), waving = S.t - SEC.t0 < 1.4;
   const o = seatedPose(SEC.fake, t);
   if (waving) { o.face = 'happy'; o.hdy = Math.floor(t * 3) % 2; }
   drawSeated(SEC.fake, t, x, fy, SEC_STYLE, o);
@@ -247,11 +247,11 @@ const drawSecretary = function (t) {
   ctx.fillStyle = '#f4f4f4'; ctx.fillRect(x + 5, fy - 16, 4, 6);
   ctx.fillStyle = '#566c86'; ctx.fillRect(x + 5, fy - 15, 3, 1); ctx.fillRect(x + 5, fy - 13, 2, 1);
   ctx.fillStyle = '#ffcd75'; ctx.fillRect(x + 6, fy - 18, 2, 1);
-  if (waving) drawBubble({ x: x + 6, fr: BOSS, inCab: false, bubble: { text: 'NEXT!', t0: SEC.t0 } });
+  if (waving) drawBubble({ x: x + 6, fr: BOSS, dy: 0, inCab: false, bubble: { text: 'NEXT!', t0: SEC.t0 } });
 };
 
 const drawWaiter = function (a, t, m) {
-  const x = Math.round(a.x), fy = footY(fIdx(BOSS)), st = a.st, w = waiterPose(m);
+  const x = Math.round(a.x), fy = footY(0), st = a.st, w = waiterPose(m);
   ctx.save();
   ctx.translate(x, 0); ctx.scale(w.dir, 1);
   const blink = ((t * 1000 + a.seed * 37) % 3600) < 160;
@@ -280,7 +280,7 @@ const drawCab = function (t) {
   R(ctx, EX, T0() - 3, 1, Math.max(0, top - T0() + 3), 'e');
   S.floors.forEach((id) => {
     const i = fIdxN(id), lit = E.ding && E.ding.f === i && S.t - E.ding.t0 < 0.9;
-    const fy = footY(fIdx(id));
+    const fy = footNow(id);
     ctx.fillStyle = lit ? (Math.floor(S.t * 8) % 2 ? '#ffcd75' : '#ef7d57') : Math.abs(E.fy - i) < 0.05 ? '#a7f070' : '#1a1c2c';
     ctx.fillRect(EX - 3, fy - ch - 3, 6, 1);
     if (lit) { ctx.fillStyle = '#ffcd75'; ctx.fillRect(EX - 6, fy - ch - 6, 1, 2); ctx.fillRect(EX + 5, fy - ch - 6, 1, 2); ctx.fillRect(EX, fy - ch - 7, 1, 2); }
@@ -306,11 +306,11 @@ const drawOffAir = function () {
   if (!off.length) return;
   ctx.save();
   for (const r of off) {
-    const y = floorTop(fIdx(r.id));
+    const y = topNow(r.id), h = heightOf(r.id);
     ctx.globalCompositeOperation = 'saturation';
-    ctx.fillStyle = '#808080'; ctx.fillRect(BM, y, S.LW - 2 * BM, S.Hf);
+    ctx.fillStyle = '#808080'; ctx.fillRect(BM, y, S.LW - 2 * BM, h);
     ctx.globalCompositeOperation = 'source-over';
-    ctx.globalAlpha = 0.5; ctx.fillStyle = '#1a1c2c'; ctx.fillRect(BM, y, S.LW - 2 * BM, S.Hf);
+    ctx.globalAlpha = 0.5; ctx.fillStyle = '#1a1c2c'; ctx.fillRect(BM, y, S.LW - 2 * BM, h);
     ctx.globalAlpha = 1;
   }
   ctx.restore();
@@ -320,18 +320,17 @@ const draw = function (t) {
   ctx.clearRect(0, 0, S.LW, cv.height);
   if (S.anim && S.bgCv && S.fc) {
     ctx.drawImage(S.bgCv, 0, 0);
-    for (const g of S.anim.out) ctx.drawImage(g.cv, -Math.round(S.anim.ps * S.LW), floorTop(g.i));
-    for (const [id, f] of S.fc) ctx.drawImage(f, S.anim.slide.has(id) ? -Math.round((1 - S.anim.p) * S.LW) : 0, floorTop(fIdx(id)));
+    for (const g of S.anim.out) ctx.drawImage(g.cv, -Math.round(S.anim.ps * S.LW), g.top);
+    for (const [id, f] of S.fc) ctx.drawImage(f, S.anim.slide.has(id) ? -Math.round((1 - S.anim.p) * S.LW) : 0, topNow(id));
   } else ctx.drawImage(stCv, 0, 0);
   S.dim += ((NIGHT || (S.total > 0 && S.working / S.total <= 0.1) ? 1 : 0) - S.dim) * Math.min(1, S.dt * 0.8);
   for (const [rid, arr] of S.slots) {
     if (!S.floors.includes(rid)) continue;
-    const fy = footY(fIdx(rid));
-    arr.forEach((aid, k) => { const a = aid && S.agents.get(aid); if (a && !a.joining) drawScreen(slotX(rid, k), fy, a, t); });
+    arr.forEach((aid, k) => { const a = aid && S.agents.get(aid); if (a && !a.joining) drawScreen(slotX(rid, k), deskFoot(rid, k), a, t); });
   }
   drawDrops();
   drawBossScreens(t);
-  for (const cf of S.dyn.coffees) { const x = cf.x, y = Math.round(floorTop(fIdx(cf.id))) + cf.dy; const p = Math.floor(t * 3) % 3; ctx.fillStyle = '#d6d6e0'; ctx.fillRect(x + (p === 1 ? 1 : 0), y - 1 - p, 1, 1); ctx.fillRect(x + 3 - (p === 2 ? 1 : 0), y - 2 - (p + 1) % 3, 1, 1); }
+  for (const cf of S.dyn.coffees) { const x = cf.x, y = topNow(cf.id) + cf.dy; const p = Math.floor(t * 3) % 3; ctx.fillStyle = '#d6d6e0'; ctx.fillRect(x + (p === 1 ? 1 : 0), y - 1 - p, 1, 1); ctx.fillRect(x + 3 - (p === 2 ? 1 : 0), y - 2 - (p + 1) % 3, 1, 1); }
   drawBoss(t);
   drawSecretary(t);
   const all = [...S.agents.values()];
@@ -341,11 +340,11 @@ const draw = function (t) {
   for (const a of all) if (a.away && !a.inCab) drawAgent(a, t);
   if (B.away && !B.inCab) drawAgent(B, t);
   drawOffAir();
-  if (S.dim > 0.01) { ctx.globalAlpha = 0.28 * S.dim; ctx.fillStyle = '#1a1c2c'; ctx.fillRect(BM, T0(), S.LW - 2 * BM, S.floors.length * S.Hf); ctx.globalAlpha = 1; }
+  if (S.dim > 0.01) { ctx.globalAlpha = 0.28 * S.dim; ctx.fillStyle = '#1a1c2c'; ctx.fillRect(BM, T0(), S.LW - 2 * BM, bodyH()); ctx.globalAlpha = 1; }
   for (const a of all) {
     const x = Math.round(a.x);
     if (!a.away) {
-      const fy = footY(fIdx(a.fr));
+      const fy = yOf(a);
       if (a.state === 'waiting' && a.sit > 0.99 && !a.bubble) thought(t, x, fy);
       if ((a.sleepy || napping(a)) && a.state === 'idle' && a.sit > 0.99) zees(t, x, fy);
       if (a.react > 0 && S.t - a.react < 1.1 && a.sit > 0.99) bang(x + 1, fy - 33);

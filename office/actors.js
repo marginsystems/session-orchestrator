@@ -25,6 +25,13 @@ const sitDown = function* (a) {
   a.hop = 0; a.sit = 1;
 };
 
+const stepRow = function* (a, dy) {
+  const d0 = a.dy;
+  if (Math.abs(d0 - dy) < 0.5) { a.dy = dy; return; }
+  yield* tween(0.25, (p) => { a.dy = lerp(d0, dy, ease(p)); });
+  a.dy = dy;
+};
+
 const moveCab = function* (room) {
   const from = E.fy;
   if (Math.abs(from - fIdxN(room)) < 0.001) return;
@@ -72,17 +79,19 @@ const ride = function* (a, toRoom) {
   a.inCab = false; a.fr = S.floors.includes(toRoom) ? toRoom : LOBBY; r.state = 'out';
 };
 
-const goTo = function* (a, room, x) {
+const goTo = function* (a, room, x, dy = 0) {
   if (a.fr !== room) {
+    yield* stepRow(a, 0);
     const f0 = a.fr, k = E.use.get(f0) || 0;
     E.use.set(f0, k + 1);
     yield* walkTo(a, EXC() - 24 - 12 * k);
     yield* ride(a, room);
-  }
+  } else if (a.dy !== dy) yield* stepRow(a, 0);
   yield* walkTo(a, x);
+  yield* stepRow(a, dy);
 };
 
-const homeOf = (a) => (a.visitor ? { room: LOBBY, x: BM + 14 } : { room: a.room, x: slotX(a.room, Math.max(0, a.slot)) });
+const homeOf = (a) => (a.visitor ? { room: LOBBY, x: BM + 14, dy: 0 } : { room: a.room, x: slotX(a.room, Math.max(0, a.slot)), dy: deskDy(a.room, Math.max(0, a.slot)) });
 
 const exitBuilding = function* (a) {
   yield* goTo(a, LOBBY, EXC());
@@ -95,10 +104,10 @@ const exitBuilding = function* (a) {
 const leaveAndSit = function* (a) {
   if (a.gone && !a.visitor) { yield* exitBuilding(a); return; }
   const h = homeOf(a);
-  yield* goTo(a, h.room, h.x);
+  yield* goTo(a, h.room, h.x, h.dy);
   if (a.visitor) { S.agents.delete(a.id); return; }
   yield* sitDown(a);
-  a.away = false; a.spd = 0; a.fr = a.room; a.x = slotX(a.room, Math.max(0, a.slot)); a.sit = 1; a.facing = 1; a.walking = false; a.hop = 0;
+  a.away = false; a.spd = 0; a.fr = a.room; a.x = slotX(a.room, Math.max(0, a.slot)); a.dy = h.dy; a.sit = 1; a.facing = 1; a.walking = false; a.hop = 0;
   if (a.gone) S.agents.delete(a.id);
 };
 
@@ -107,7 +116,7 @@ const freeSeat = function (a) {
   if (S.agents.get(a.id) === a) return;
   const px = slotX(a.room, Math.max(0, a.slot)) + 14, room = a.room;
   if (S.last) applyState(S.last);
-  if (S.floors.includes(room) && !S.anim) S.puffs.push({ x: px, y: footY(fIdx(room)), t0: S.t });
+  if (S.floors.includes(room) && !S.anim) S.puffs.push({ x: px, y: deskFoot(room, Math.max(0, a.slot)), t0: S.t });
 };
 
 const leaveTask = function* (a) {
@@ -131,7 +140,7 @@ const trip = function* (a, bid, text) {
   else yield* stand(a);
   const b = S.agents.get(bid);
   if (b && !b.gone && b.slot >= 0) {
-    yield* goTo(a, b.room, slotX(b.room, b.slot) - VIS_DX);
+    yield* goTo(a, b.room, slotX(b.room, b.slot) - VIS_DX, deskDy(b.room, b.slot));
     a.facing = 1;
     yield* wait(0.2);
     a.bubble = speech(text, S.t); b.react = S.t;
@@ -154,7 +163,7 @@ const bossVisit = function* (id) {
   B.away = true;
   S.visitTarget = id;
   yield* stand(B);
-  yield* goTo(B, a.room, slotX(a.room, Math.max(0, a.slot)) - VIS_DX);
+  yield* goTo(B, a.room, slotX(a.room, Math.max(0, a.slot)) - VIS_DX, deskDy(a.room, Math.max(0, a.slot)));
   B.facing = 1;
   yield* wait(0.2);
   yield* until(() => !coolerTripOf(id) && (!a.away || a.gone));
@@ -194,7 +203,7 @@ const joinTask = function* (a) {
   yield* wait(0.38);
   a.joining = false;
   S.drops.delete(a.id);
-  S.puffs.push({ x: slotX(a.room, a.slot) + 14, y: footY(fIdx(a.room)), t0: S.t });
+  S.puffs.push({ x: slotX(a.room, a.slot) + 14, y: deskFoot(a.room, a.slot), t0: S.t });
   drawStatic();
   yield* wait(0.35);
   yield* leaveAndSit(a);
