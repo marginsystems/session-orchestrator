@@ -46,6 +46,51 @@ const doors = function* (to) {
   if (to === 1) E.ding = { f: Math.round(E.fy), t0: S.t };
 };
 
+const LD = { open: 0, users: 0 };
+const FAREWELLS = ['BYE!', 'SEE YA!', 'HOME TIME', 'LOGGING OFF', 'CIAO!', 'ALL DONE'];
+const lobbyDoorX = () => BM + 14;
+
+const lobbyDoorProc = function* () {
+  for (;;) {
+    const dt = yield;
+    const step = (dt || 0) / 0.3;
+    LD.open = LD.users > 0 ? Math.min(1, LD.open + step) : Math.max(0, LD.open - step);
+  }
+};
+
+const hopOnce = function* (a) {
+  yield* tween(0.32, (p) => { a.hop = Math.sin(p * Math.PI) * 6; });
+  a.hop = 0;
+};
+
+const lobbyLinger = function* (a) {
+  if (!CHAOS) return;
+  const r = rng(a.seed + Math.floor(S.t * 7));
+  const left = lobbyDoorX() + 16, right = EXC() - 22;
+  if (right > left && r() < 0.35 * CHAOS) {
+    yield* walkTo(a, Math.round(lerp(left, right, r())));
+    if (!a.gone) return;
+    yield* wait(0.6 + r() * 1.2 * CHAOS);
+    if (!a.gone) return;
+  }
+  if (r() < 0.3 * CHAOS) {
+    a.facing = -a.facing;
+    yield* wait(0.4 + r() * 0.8);
+    a.facing = -a.facing;
+    if (!a.gone) return;
+  }
+  if (r() < 0.25 * CHAOS) {
+    const n = 1 + Math.floor(r() * 2);
+    for (let k = 0; k < n; k++) yield* hopOnce(a);
+    if (!a.gone) return;
+  }
+  if (r() < 0.4 * CHAOS) {
+    a.bubble = speech(FAREWELLS[Math.floor(r() * FAREWELLS.length)], S.t);
+    yield* wait(1.5);
+    a.bubble = null;
+  }
+};
+
 const elevatorProc = function* () {
   for (;;) {
     if (!E.queue.length) { yield; continue; }
@@ -95,10 +140,18 @@ const homeOf = (a) => (a.visitor ? { room: LOBBY, x: BM + 14, dy: 0 } : { room: 
 
 const exitBuilding = function* (a) {
   yield* goTo(a, LOBBY, EXC());
+  if (a.gone) yield* lobbyLinger(a);
+  if (a.gone) yield* walkTo(a, lobbyDoorX() + 2);
   if (!a.gone) { yield* leaveAndSit(a); return; }
-  yield* tween(0.35, (p) => { if (a.gone) a.alpha = 1 - p; });
-  if (!a.gone) { a.alpha = 1; yield* leaveAndSit(a); return; }
+  LD.users++;
+  yield* until(() => LD.open > 0.95 || !a.gone);
+  const x0 = a.x;
+  a.facing = -1;
+  if (a.gone) yield* tween(0.45, (p) => { if (a.gone) { a.x = x0 - 6 * p; a.alpha = 1 - p; } });
+  if (!a.gone) { a.alpha = 1; LD.users--; yield* leaveAndSit(a); return; }
   S.agents.delete(a.id);
+  yield* wait(0.35);
+  LD.users--;
 };
 
 const leaveAndSit = function* (a) {
