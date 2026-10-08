@@ -5,7 +5,7 @@ const startDemo = function () {
   const rooms = [{ id: 'dashboard', label: 'dashboard' }, { id: 'gateway', label: 'gateway' }, { id: 'infra', label: 'infra' }, { id: 'docs', label: 'docs' }];
   const who = [['Fern', 'gateway', 'working', 'Fix flaky test'], ['Moss', 'gateway', 'idle', 'Update docs'], ['Juniper', 'gateway', 'waiting', 'Review PR'], ['Pebble', 'dashboard', 'working', 'Refactor parser'], ['Sage', 'dashboard', 'working', 'Add retry logic'], ['Wren', 'dashboard', 'idle', 'Bump deps'], ['Basil', 'docs', 'idle', 'Write changelog'], ['Cedar', 'docs', 'working', 'Tune query'], ['Clover', 'infra', 'waiting', 'Trace slow call'], ['Ash', 'infra', 'idle', 'Clean up types']];
   let seq = 0;
-  const agents = who.map(([name, room, state, title]) => ({ id: 'd_' + name.toLowerCase(), name, room, state, title, since: state === 'waiting' ? ++seq : 0, sleepy: name === 'Basil' }));
+  const agents = who.map(([name, room, state, title]) => ({ id: 'd_' + name.toLowerCase(), name, room, state, title, since: state === 'waiting' ? ++seq : 0, sleepy: name === 'Basil', perm: name === 'Moss' ? 'auto' : name === 'Ash' ? '' : 'bypass', approval: name === 'Ash' }));
   let pendingEvents = [];
   const push = () => { const events = pendingEvents; pendingEvents = []; applyState({ rooms, agents, events, generatedAt: Date.now() }); };
   push();
@@ -17,6 +17,7 @@ const startDemo = function () {
       yield* wait(2.2 + Rn() * 2.8);
       if (night) continue;
       const a = pick(agents);
+      if (a.approval) continue;
       const working = agents.filter((x) => x.state === 'working').length;
       if (a.state === 'working') a.state = Rn() < 0.5 && working > 2 ? 'waiting' : 'idle';
       else a.state = 'working';
@@ -67,7 +68,7 @@ const startDemo = function () {
       room = pick(open.length ? open : rooms);
     }
     const name = NEWBIES[nx % NEWBIES.length] + (nx >= NEWBIES.length ? ' ' + Math.floor(nx / NEWBIES.length + 1) : '');
-    const ag = { id: 'dn_' + nx, name, room: room.id, state: 'working', title: TITLES[nx % TITLES.length], since: 0, sleepy: false };
+    const ag = { id: 'dn_' + nx, name, room: room.id, state: 'working', title: TITLES[nx % TITLES.length], since: 0, sleepy: false, perm: 'bypass', approval: false };
     agents.push(ag); extras.push(ag);
     pendingEvents.push({ id: 'jn' + nx, kind: 'join', agentId: ag.id, at: Date.now() });
     nx++;
