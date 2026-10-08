@@ -283,7 +283,7 @@ const startTrip = function (fromId, toId, text) {
   if (!target || target.gone || target.slot < 0) return false;
   let a = S.agents.get(fromId);
   if (!a || a.gone) a = makeVisitor();
-  else if ((a.away && !claimCooler(a)) || a.slot < 0) return false;
+  else if (a.approval || (a.away && !claimCooler(a)) || a.slot < 0) return false;
   spawn(trip(a, toId, up(text)));
   return true;
 };

@@ -530,7 +530,7 @@ function scanFull(now = Date.now(), queueSource) {
   roomLabelsNow = realLabels;
   const rank = new Map(ordered.map((r, i) => [r.id, i]));
   const asleep = agents
-    .filter(({ s, state }) => state === 'idle' && now - s.mtime > SLEEPY_MS && s.uuid !== queueFile.orchestrator && (!streaming || air.has(s.room.id)))
+    .filter(({ s, state, agent }) => state === 'idle' && !agent.approval && now - s.mtime > SLEEPY_MS && s.uuid !== queueFile.orchestrator && (!streaming || air.has(s.room.id)))
     .sort((a, b) => (rank.get(a.s.room.id) ?? 0) - (rank.get(b.s.room.id) ?? 0) || a.s.mtime - b.s.mtime)
     .map(({ s }) => s.uuid);
   return { snap, slotOnAir, asleep };
