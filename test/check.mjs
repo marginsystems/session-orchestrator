@@ -803,6 +803,7 @@ const permissionJob = async () => {
   writeDesktop(home, local(pick('beacon', 380)), pick('beacon', 380).uuid, { permissionMode: 'bypassPermissions' });
   writeDesktop(home, local(pick('delta', 400)), pick('delta', 400).uuid, { permissionMode: 'auto' });
   writeDesktop(home, local(pick('citadel', 100000)), pick('citadel', 100000).uuid, { permissionMode: 'default' });
+  writeDesktop(home, local(pick('citadel', 240)), pick('citadel', 240).uuid, { permissionMode: 'default', scheduledTaskId: 'nightly-report' });
   const s = JSON.parse(execFileSync('node', [join(ROOT, 'scan.mjs'), '--once', '--json'], { env: { ...process.env, HOME: home }, encoding: 'utf8' }));
   const agent = (f) => s.agents.find((x) => x.id === f.id);
   const ask = agent(pick('atlas', 300)), bypass = agent(pick('beacon', 380)), auto = agent(pick('delta', 400)), done = agent(pick('citadel', 100000)), unknown = agent(pick('beacon', 200));
@@ -811,6 +812,8 @@ const permissionJob = async () => {
   check(auto.perm === 'auto' && auto.approval === true, `auto session with a pending tool ${JSON.stringify(auto)}`);
   check(!done.approval && done.perm === undefined, `finished default session flagged ${JSON.stringify(done)}`);
   check(!unknown.approval && unknown.perm === undefined, `session without a known mode flagged ${JSON.stringify(unknown)}`);
+  const routine = agent(pick('citadel', 240));
+  check(!routine.approval, `scheduled-routine run flagged as waiting for approval ${JSON.stringify(routine)}`);
   say('permissions ok');
 };
 

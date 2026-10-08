@@ -221,7 +221,7 @@ function desktopSessions() {
         if (!rec || rec.mtimeMs !== st.mtimeMs) {
           try {
             const j = JSON.parse(readFileSync(p, 'utf8'));
-            rec = { mtimeMs: st.mtimeMs, local: j.sessionId, cli: j.cliSessionId, title: j.title, archived: j.isArchived === true, account: a, last: Number(j.lastActivityAt) || 0, mode: typeof j.permissionMode === 'string' ? j.permissionMode : '' };
+            rec = { mtimeMs: st.mtimeMs, local: j.sessionId, cli: j.cliSessionId, title: j.title, archived: j.isArchived === true, account: a, last: Number(j.lastActivityAt) || 0, mode: typeof j.permissionMode === 'string' ? j.permissionMode : '', routine: typeof j.scheduledTaskId === 'string' && j.scheduledTaskId !== '' };
           } catch {
             rec = { mtimeMs: st.mtimeMs };
           }
@@ -473,7 +473,7 @@ function scanFull(now = Date.now(), queueSource) {
     else if (kind === 'tool_use' && age < PENDING_WORKING_MS) state = 'working';
     else if (kind === 'prompt' && age < PENDING_WORKING_MS) state = 'working';
     const mode = cliToLocal.get(s.uuid)?.mode || '';
-    const approval = kind === 'tool_use' && age >= APPROVAL_MS && mode !== '' && mode !== 'bypassPermissions';
+    const approval = kind === 'tool_use' && age >= APPROVAL_MS && mode !== '' && mode !== 'bypassPermissions' && !cliToLocal.get(s.uuid)?.routine;
     if (approval) state = 'idle';
     if (waitingSet.has(s.uuid) && !approval) state = 'waiting';
     let name = NAMES[num(s.uuid) % NAMES.length];
