@@ -40,6 +40,7 @@ const DESKTOP_SESSIONS = join(homedir(), 'Library', 'Application Support', 'Clau
 const WINDOW_MS = 7 * 24 * 3600 * 1000;
 const WORKING_MS = 30 * 1000;
 const PENDING_WORKING_MS = 120 * 1000;
+const APPROVAL_MS = 15 * 1000;
 const SLEEPY_MS = 30 * 60 * 1000;
 const EVENT_MS = 10 * 60 * 1000;
 const TAIL_BYTES = 400 * 1024;
@@ -220,7 +221,7 @@ function desktopSessions() {
         if (!rec || rec.mtimeMs !== st.mtimeMs) {
           try {
             const j = JSON.parse(readFileSync(p, 'utf8'));
-            rec = { mtimeMs: st.mtimeMs, local: j.sessionId, cli: j.cliSessionId, title: j.title, archived: j.isArchived === true, account: a, last: Number(j.lastActivityAt) || 0 };
+            rec = { mtimeMs: st.mtimeMs, local: j.sessionId, cli: j.cliSessionId, title: j.title, archived: j.isArchived === true, account: a, last: Number(j.lastActivityAt) || 0, mode: typeof j.permissionMode === 'string' ? j.permissionMode : '' };
           } catch {
             rec = { mtimeMs: st.mtimeMs };
           }
@@ -471,12 +472,18 @@ function scanFull(now = Date.now(), queueSource) {
     if (age < WORKING_MS) state = 'working';
     else if (kind === 'tool_use' && age < PENDING_WORKING_MS) state = 'working';
     else if (kind === 'prompt' && age < PENDING_WORKING_MS) state = 'working';
-    if (waitingSet.has(s.uuid)) state = 'waiting';
+    const mode = cliToLocal.get(s.uuid)?.mode || '';
+    const approval = kind === 'tool_use' && age >= APPROVAL_MS && mode !== '' && mode !== 'bypassPermissions';
+    if (approval) state = 'idle';
+    if (waitingSet.has(s.uuid) && !approval) state = 'waiting';
     let name = NAMES[num(s.uuid) % NAMES.length];
     for (let n = 2; names.has(name); n++) name = NAMES[num(s.uuid) % NAMES.length] + ' ' + n;
     names.add(name);
     const agent = { id: 'a' + sha(s.uuid).slice(0, 8), name, room: s.room.id, state };
-    if (state === 'idle' && age > SLEEPY_MS) agent.sleepy = true;
+    if (state === 'idle' && age > SLEEPY_MS && !approval) agent.sleepy = true;
+    if (mode === 'bypassPermissions') agent.perm = 'bypass';
+    else if (mode === 'auto') agent.perm = 'auto';
+    if (approval) agent.approval = true;
     if (showingTitles() && !(streaming && !air.has(s.room.id))) {
       const rec = cliToLocal.get(s.uuid);
       if (rec && rec.title) agent.title = String(rec.title);
@@ -506,7 +513,7 @@ function scanFull(now = Date.now(), queueSource) {
   const target = focusUuid ? byUuid.get(focusUuid) : null;
   const focused = focusUuid ? agents.find((x) => x.s.uuid === focusUuid) : undefined;
   const answered = !!wanted && !!focused && [...focused.s.info.prompts, ...focused.s.info.messages].some((p) => p.at > wanted.at);
-  const focus = wanted && !answered ? { agentId: target ? target.id : 'visitor', at: wanted.at } : null;
+  const focus = wanted && !answered && !(target && target.approval) ? { agentId: target ? target.id : 'visitor', at: wanted.at } : null;
 
   const ordered = [...rooms.values()].sort((a, b) => {
     const ra = priorityRank(a), rb = priorityRank(b);
@@ -523,7 +530,7 @@ function scanFull(now = Date.now(), queueSource) {
   roomLabelsNow = realLabels;
   const rank = new Map(ordered.map((r, i) => [r.id, i]));
   const asleep = agents
-    .filter(({ s, state }) => state === 'idle' && now - s.mtime > SLEEPY_MS && s.uuid !== queueFile.orchestrator && (!streaming || air.has(s.room.id)))
+    .filter(({ s, state, agent }) => state === 'idle' && !agent.approval && now - s.mtime > SLEEPY_MS && s.uuid !== queueFile.orchestrator && (!streaming || air.has(s.room.id)))
     .sort((a, b) => (rank.get(a.s.room.id) ?? 0) - (rank.get(b.s.room.id) ?? 0) || a.s.mtime - b.s.mtime)
     .map(({ s }) => s.uuid);
   return { snap, slotOnAir, asleep };

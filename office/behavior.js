@@ -107,7 +107,7 @@ const ruleShuffle = function (m, c) {
 
 const ruleSleepSpreads = function (m, c) {
   const a = m.actor;
-  if (!a || a.state !== 'idle' || a.sleepy || m.doze > S.t || m.cool > S.t) return null;
+  if (!a || a.state !== 'idle' || a.sleepy || a.approval || m.doze > S.t || m.cool > S.t) return null;
   let drowsy = 0;
   for (const n of c.near) if (n.actor && n.actor.state === 'idle' && (n.actor.sleepy || napping(n.actor))) drowsy++;
   const p = (drowsy ? 0.06 + 0.1 * m.sleepy : 0.002 * m.sleepy) * c.chaos;

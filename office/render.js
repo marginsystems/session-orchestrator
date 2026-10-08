@@ -13,7 +13,20 @@ const drawScreen = function (x, fy, a, t) {
   const tick = Math.floor(t * 3);
   const seated = a.sit > 0.99 && !a.away;
   const sx = x + 17, sy = fy - 20;
+  if (a.perm === 'bypass') {
+    const pulse = Math.sin(t * 3 + a.seed);
+    ctx.fillStyle = '#73eff7';
+    ctx.globalAlpha = 0.22 + 0.12 * pulse; ctx.fillRect(sx - 6, sy - 6, 22, 19);
+    ctx.globalAlpha = 0.5 + 0.2 * pulse; ctx.fillRect(sx - 3, sy - 3, 16, 13);
+    ctx.globalAlpha = 1; ctx.fillRect(sx - 1, sy - 1, 12, 9);
+    if (Math.floor(t * 2 + a.seed) % 3 === 0) { ctx.fillStyle = '#f4f4f4'; ctx.fillRect(sx - 3, sy - 3, 1, 1); ctx.fillRect(sx + 12, sy + 8, 1, 1); }
+  }
   ctx.fillStyle = '#1a1c2c'; ctx.fillRect(sx, sy, 10, 7);
+  if (a.perm === 'auto') { ctx.fillStyle = '#38b764'; ctx.fillRect(sx + 9, sy + 8, 1, 1); }
+  if (a.approval && seated) {
+    ctx.fillStyle = Math.floor(t * 2) % 2 ? '#b13e53' : '#ef7d57'; ctx.fillRect(sx + 4, sy + 1, 2, 3); ctx.fillRect(sx + 4, sy + 5, 2, 1);
+    return;
+  }
   if (a.state === 'working' && seated) {
     for (let i = 0; i < 4; i++) { const L = 3 + (hn(tick + i + a.seed) % 7); ctx.fillStyle = i % 2 ? sc[1] : sc[0]; ctx.fillRect(sx + 1 + (i % 2), sy + i * 2, Math.min(L, 8 - (i % 2)), 1); }
     if (Math.floor(t * 2) % 2) { ctx.fillStyle = '#f4f4f4'; ctx.fillRect(sx + 8, sy + 6, 1, 1); }
@@ -358,7 +371,8 @@ const draw = function (t) {
     const x = Math.round(a.x);
     if (!a.away) {
       const fy = yOf(a);
-      if (a.state === 'waiting' && a.sit > 0.99 && !a.bubble) thought(ownTime(a, t), x, fy);
+      if (a.approval && a.sit > 0.99 && !a.bubble) drawBubble({ x, fr: a.fr, dy: a.dy, inCab: false, bubble: { text: 'NEED OK', t0: -9, lift: 0 } });
+      else if (a.state === 'waiting' && a.sit > 0.99 && !a.bubble) thought(ownTime(a, t), x, fy);
       if ((a.sleepy || napping(a)) && a.state === 'idle' && a.sit > 0.99) zees(ownTime(a, t), x, fy);
       if (a.react > 0 && S.t - a.react < 1.1 && a.sit > 0.99) bang(x + 1, fy - 33);
     } else if (a.react > 0 && S.t - a.react < 1.1) bang(x, yOf(a) - 24);

@@ -30,7 +30,7 @@ const propNow = (v) => S.dyn.props.find((p) => p.id === v.floor && p.row === v.p
 const visitorsAt = (prop, floor) => [...BH.visits.values()].filter((v) => !v.dead && v.floor === floor && v.prop.row === prop.row && v.prop.x === prop.x && v.phase !== 'back');
 const settledAt = (prop, floor) => visitorsAt(prop, floor).filter((v) => v.phase === 'at');
 
-const needed = (a) => a.state !== 'idle' || a.sleepy || a.q || a.gone || a.leaving || a.slot < 0 || a.joining
+const needed = (a) => a.state !== 'idle' || a.sleepy || a.approval || a.q || a.gone || a.leaving || a.slot < 0 || a.joining
   || !!(S.focus && S.focus.agentId === a.id) || S.visits.includes(a.id) || S.visitTarget === a.id;
 
 const bossNear = (floor, x, dy) => B.away && !B.inCab && B.fr === floor && Math.abs(B.dy - dy) < 2 && Math.abs(B.x - x) < COOLER_NEAR;
@@ -106,7 +106,7 @@ const startCooler = function (m, prop) {
 
 const ruleCooler = function (m, c) {
   const a = m.actor;
-  if (!a || !S.dyn.props.length || a.state !== 'idle' || a.sleepy || m.trip > S.t || m.doze > S.t || m.busy > S.t || napping(a)) return null;
+  if (!a || !S.dyn.props.length || a.state !== 'idle' || a.sleepy || a.approval || m.trip > S.t || m.doze > S.t || m.busy > S.t || napping(a)) return null;
   if (a.away || a.q || a.joining || a.leaving || a.gone || BH.visits.has(a.id) || S.visits.includes(a.id) || S.visitTarget === a.id) return null;
   if (S.focus && S.focus.agentId === a.id) return null;
   const open = coolerProps(c.floor, slotRow(c.floor, m.slot)).filter((p) => visitorsAt(p, c.floor).length < COOLER_MAX);

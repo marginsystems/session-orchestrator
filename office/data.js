@@ -45,7 +45,7 @@ const applyState = function (raw) {
       a = newAgent(d); S.agents.set(a.id, a);
       if (joinIds.has(d.id)) { a.joining = true; a.away = true; a.fr = LOBBY; a.x = BM + 8; a.alpha = 0; a.sit = 0; a.facing = 1; joiners.push(a); }
     }
-    a.name = d.name; a.state = d.state; a.sleepy = !!d.sleepy; a.gone = false; a.title = d.title || '';
+    a.name = d.name; a.state = d.state; a.sleepy = !!d.sleepy; a.gone = false; a.title = d.title || ''; a.perm = d.perm || ''; a.approval = !!d.approval;
     if (a.room !== d.room) { a.room = d.room; if (!a.away) a.fr = d.room; }
   }
   const leavers = [];
