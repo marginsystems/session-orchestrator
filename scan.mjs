@@ -513,7 +513,7 @@ function scanFull(now = Date.now(), queueSource) {
   const target = focusUuid ? byUuid.get(focusUuid) : null;
   const focused = focusUuid ? agents.find((x) => x.s.uuid === focusUuid) : undefined;
   const answered = !!wanted && !!focused && [...focused.s.info.prompts, ...focused.s.info.messages].some((p) => p.at > wanted.at);
-  const focus = wanted && !answered ? { agentId: target ? target.id : 'visitor', at: wanted.at } : null;
+  const focus = wanted && !answered && !(target && target.approval) ? { agentId: target ? target.id : 'visitor', at: wanted.at } : null;
 
   const ordered = [...rooms.values()].sort((a, b) => {
     const ra = priorityRank(a), rb = priorityRank(b);
