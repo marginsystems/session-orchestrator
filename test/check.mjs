@@ -794,6 +794,40 @@ const goneJob = async () => {
   say('gone ok');
 };
 
+const checkInJob = async () => {
+  const home = mkdtempSync(join(tmpdir(), 'so-checkin-'));
+  const fx = makeFixture(home);
+  const local = (project, ageSec) => 'local_fx' + (fx.findIndex((f) => f.project === project && f.ageSec === ageSec) - 1);
+  for (const [project, ageSec] of [['atlas', 3600], ['beacon', 7200], ['citadel', 100000]]) {
+    writeDesktop(home, local(project, ageSec), fx.find((f) => f.project === project && f.ageSec === ageSec).uuid, { title: 'Idle ' + project });
+  }
+  const dir = join(home, '.session-orchestrator');
+  const env = { env: { ...process.env, HOME: home }, encoding: 'utf8' };
+  const nextInfo = () => execFileSync('node', [join(ROOT, 'scan.mjs'), '--next-info'], env);
+  const asked = (ids) => writeFileSync(join(dir, 'checkins.json'), JSON.stringify({ items: ids.map((sessionId) => ({ sessionId, at: new Date().toISOString() })) }));
+  writeQueue(home, []);
+  const info = nextInfo();
+  check(/^QUEUE: empty\nCHECK_IN: idle$/m.test(info) && new RegExp(`^SESSION_ID: "${local('atlas', 3600)}"$`, 'm').test(info) && /^TITLE: "Idle atlas"$/m.test(info) && /^PROJECT: "atlas"$/m.test(info) && /^CONTEXT_PERCENT: /m.test(info), `check-in top floor ${info}`);
+  writeQueue(home, [], local('atlas', 3600));
+  check(/^TITLE: "Idle beacon"$/m.test(nextInfo()), `check-in skips the orchestrator ${nextInfo()}`);
+  writeQueue(home, []);
+  asked([local('atlas', 3600)]);
+  check(/^TITLE: "Idle beacon"$/m.test(nextInfo()), `check-in skips a session asked recently ${nextInfo()}`);
+  writeFileSync(join(dir, 'checkins.json'), JSON.stringify({ items: [{ sessionId: local('atlas', 3600), at: new Date(Date.now() - 25 * 3600 * 1000).toISOString() }] }));
+  check(/^TITLE: "Idle atlas"$/m.test(nextInfo()), `check-in asks again after a day ${nextInfo()}`);
+  const rooms = JSON.parse(execFileSync('node', [join(ROOT, 'scan.mjs'), '--once', '--json'], env)).rooms;
+  const roomId = (label) => rooms.find((r) => r.label === label).id;
+  writeFileSync(join(dir, 'settings.json'), JSON.stringify({ order: [roomId('citadel')] }));
+  check(/^TITLE: "Idle citadel"$/m.test(nextInfo()), `check-in follows floor priority ${nextInfo()}`);
+  writeFileSync(join(dir, 'settings.json'), JSON.stringify({ streamer: true, onAir: [roomId('atlas')] }));
+  asked([local('atlas', 3600)]);
+  check(nextInfo().trim() === 'QUEUE: empty', `check-in only asks on-air floors ${nextInfo()}`);
+  writeQueue(home, ['local_fixture1']);
+  rmSync(join(dir, 'settings.json'));
+  check(!/CHECK_IN/.test(nextInfo()), `check-in with items queued ${nextInfo()}`);
+  say('check-in ok');
+};
+
 const streamerJob = async () => {
   const home = mkdtempSync(join(tmpdir(), 'so-stream-'));
   const fx = makeFixture(home);
@@ -1752,6 +1786,7 @@ add('server', ['server'], serverJob, true);
 add('crowd', ['server'], crowdJob, true);
 add('streamer', ['server'], streamerJob, true);
 add('gone', ['server'], goneJob, true);
+add('check-in', ['server'], checkInJob, true);
 add('live', ['live'], liveJob, true);
 add('leave l1280', ['leave', 'ui'], () => leaveCheck(1280, 720, 'l1280'), true);
 add('leave l390', ['leave', 'ui'], () => leaveCheck(390, 844, 'l390'));

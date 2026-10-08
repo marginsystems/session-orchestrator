@@ -98,6 +98,8 @@ The first time you open the office, the Boss walks you through six short steps: 
 
 Run `/orchestrate` in one session to make it the orchestrator; running it in another session hands the job over. In that session, `/next` brings the front of the queue into the Boss Office. Every item `/next` shows names its session exactly as the sidebar does, with its project and how full its context window is (`node scan.mjs --next-info` prints the title, project and token count for the front of the queue).
 
+When the queue has nothing for you, `/next` checks in with an idle session instead: the one asleep longest on the highest-priority floor that has not been asked in the last 24 hours (on-air floors only in streamer mode). A session qualifies only if it has a matching desktop-session record with a title; without one, `/next` reports only that the queue is empty or nothing is on air, with no check-in. It asks the session what is next and whether it can be closed out, the answer comes back to the orchestrator, and you choose: close it out, go ahead with its next step, or leave it. The orchestrator records each check-in in `~/.session-orchestrator/checkins.json`.
+
 ## The `next` contract
 
 An orchestrator session (or anything else) writes `~/.session-orchestrator/focus.json` when you want a session brought to the boss:

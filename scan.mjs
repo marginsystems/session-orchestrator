@@ -28,6 +28,8 @@ const DATA_DIR = join(homedir(), '.session-orchestrator');
 const FOCUS_FILE = join(DATA_DIR, 'focus.json');
 const QUEUE_FILE = join(DATA_DIR, 'queue.json');
 const QUEUE_MAX = 200;
+const CHECKIN_FILE = join(DATA_DIR, 'checkins.json');
+const CHECKIN_MS = 24 * 3600 * 1000;
 const SETTINGS_FILE = join(DATA_DIR, 'settings.json');
 const SETTINGS_MAX_BYTES = 4096;
 const ORDER_MAX = 64;
@@ -323,7 +325,7 @@ function readQueue(now, desktop, source) {
   try {
     const f = source === undefined ? JSON.parse(readFileSync(QUEUE_FILE, 'utf8')) : source;
     const at = Date.parse(f.at);
-    if (!Number.isFinite(at) || at > now + 60000 || now - at >= FOCUS_MAX_MS || !Array.isArray(f.items)) return { uuids: [], slots: [], gone: [], size: 0, orchestrator: '' };
+    if (!Number.isFinite(at) || at > now + 60000 || now - at >= FOCUS_MAX_MS || !Array.isArray(f.items)) return { uuids: [], slots: [], gone: [], size: 0, orchestrator: toUuid(f.orchestrator, desktop) };
     const items = f.items.slice(0, QUEUE_MAX);
     const uuids = [];
     const slots = [];
@@ -519,7 +521,12 @@ function scanFull(now = Date.now(), queueSource) {
   const line = queueFile.slots.filter((u, i) => slotOnAir[i]).map((u) => { const a = u ? byUuid.get(u) : undefined; return a ? a.id : null; });
   const snap = { generatedAt: now, rooms: outRooms, agents: agents.map((a) => a.agent), events, focus, queue, queueSize: line.length, deferred: queueFile.size - line.length, line };
   roomLabelsNow = realLabels;
-  return { snap, slotOnAir };
+  const rank = new Map(ordered.map((r, i) => [r.id, i]));
+  const asleep = agents
+    .filter(({ s, state }) => state === 'idle' && now - s.mtime > SLEEPY_MS && s.uuid !== queueFile.orchestrator && (!streaming || air.has(s.room.id)))
+    .sort((a, b) => (rank.get(a.s.room.id) ?? 0) - (rank.get(b.s.room.id) ?? 0) || a.s.mtime - b.s.mtime)
+    .map(({ s }) => s.uuid);
+  return { snap, slotOnAir, asleep };
 }
 
 const scan = (now) => scanFull(now).snap;
@@ -566,32 +573,19 @@ function contextUsage(path, size) {
   return { tokens, model };
 }
 
-function nextInfo() {
-  const now = Date.now();
-  const desktop = desktopSessions();
-  let queueSource;
-  let items = [];
+function recentCheckins(now, desktop) {
+  const out = new Set();
   try {
-    queueSource = JSON.parse(readFileSync(QUEUE_FILE, 'utf8'));
-    const at = Date.parse(queueSource.at);
-    if (Number.isFinite(at) && at <= now + 60000 && now - at < FOCUS_MAX_MS && Array.isArray(queueSource.items)) items = queueSource.items.slice(0, QUEUE_MAX);
+    const f = JSON.parse(readFileSync(CHECKIN_FILE, 'utf8'));
+    for (const it of Array.isArray(f.items) ? f.items : []) {
+      const at = Date.parse(it && it.at);
+      if (Number.isFinite(at) && at <= now + 60000 && now - at < CHECKIN_MS) out.add(toUuid(it.sessionId, desktop));
+    }
   } catch {}
-  if (!items.length) return 'QUEUE: empty';
-  const gone = readQueue(now, desktop, queueSource).gone;
-  const goneLine = gone.some(Boolean) ? 'GONE: ' + gone.flatMap((g, i) => (g ? [i] : [])).join(',') + '\n' : '';
-  let index = gone.findIndex((g) => !g);
-  if (index < 0) return goneLine + 'QUEUE: empty';
-  if (settings.streamer) {
-    const eligible = scanFull(now, queueSource).slotOnAir;
-    index = eligible.findIndex((ok) => ok);
-    if (index < 0) return goneLine + 'QUEUE: nothing on air';
-  }
-  const item = items[index];
-  const prefix = goneLine + ['QUEUE_INDEX: ' + index, ...(settings.streamer ? ['DEFERRED: ' + index] : [])].join('\n') + '\n';
-  const sid = typeof item === 'string' ? item : item && typeof item.sessionId === 'string' ? item.sessionId : '';
-  if (!sid) return prefix + 'SESSION_ID: "none"\nTITLE: "none"\nPROJECT: "none"\nCONTEXT_TOKENS: 0\nCONTEXT_PERCENT: unknown';
-  const rec = sid.startsWith('local_') ? desktop.get(sid) : [...desktop.values()].find((r) => r.cli === sid);
-  const uuid = toUuid(sid, desktop);
+  return out;
+}
+
+function sessionLines(sid, rec, uuid, now) {
   let file = '';
   try {
     for (const d of readdirSync(PROJECTS)) {
@@ -612,7 +606,7 @@ function nextInfo() {
     }
   }
   const windowSize = contextWindow(model);
-  return prefix + [
+  return [
     'SESSION_ID: ' + JSON.stringify(sid),
     'TITLE: ' + JSON.stringify(rec && rec.title ? String(rec.title) : 'unknown'),
     'TITLE_AVAILABLE: ' + Boolean(rec && rec.title),
@@ -622,6 +616,43 @@ function nextInfo() {
     'CONTEXT_PERCENT: ' + (tokens && windowSize ? Math.round((tokens / windowSize) * 100) : 'unknown'),
     'CHECKED_AT: ' + new Date(now).toISOString(),
   ].join('\n');
+}
+
+function checkIn(now, desktop, full, head) {
+  const asked = recentCheckins(now, desktop);
+  const byCli = new Map([...desktop.values()].map((r) => [r.cli, r]));
+  const uuid = full.asleep.find((u) => !asked.has(u) && byCli.get(u)?.title);
+  const rec = uuid ? byCli.get(uuid) : undefined;
+  if (!uuid || !rec) return head;
+  return head + '\nCHECK_IN: idle\n' + sessionLines(rec.local, rec, uuid, now);
+}
+
+function nextInfo() {
+  const now = Date.now();
+  const desktop = desktopSessions();
+  let queueSource;
+  let items = [];
+  try {
+    queueSource = JSON.parse(readFileSync(QUEUE_FILE, 'utf8'));
+    const at = Date.parse(queueSource.at);
+    if (Number.isFinite(at) && at <= now + 60000 && now - at < FOCUS_MAX_MS && Array.isArray(queueSource.items)) items = queueSource.items.slice(0, QUEUE_MAX);
+  } catch {}
+  if (!items.length) return checkIn(now, desktop, scanFull(now, queueSource), 'QUEUE: empty');
+  const gone = readQueue(now, desktop, queueSource).gone;
+  const goneLine = gone.some(Boolean) ? 'GONE: ' + gone.flatMap((g, i) => (g ? [i] : [])).join(',') + '\n' : '';
+  let index = gone.findIndex((g) => !g);
+  if (index < 0) return checkIn(now, desktop, scanFull(now, queueSource), goneLine + 'QUEUE: empty');
+  if (settings.streamer) {
+    const full = scanFull(now, queueSource);
+    index = full.slotOnAir.findIndex((ok) => ok);
+    if (index < 0) return checkIn(now, desktop, full, goneLine + 'QUEUE: nothing on air');
+  }
+  const item = items[index];
+  const prefix = goneLine + ['QUEUE_INDEX: ' + index, ...(settings.streamer ? ['DEFERRED: ' + index] : [])].join('\n') + '\n';
+  const sid = typeof item === 'string' ? item : item && typeof item.sessionId === 'string' ? item.sessionId : '';
+  if (!sid) return prefix + 'SESSION_ID: "none"\nTITLE: "none"\nPROJECT: "none"\nCONTEXT_TOKENS: 0\nCONTEXT_PERCENT: unknown';
+  const rec = sid.startsWith('local_') ? desktop.get(sid) : [...desktop.values()].find((r) => r.cli === sid);
+  return prefix + sessionLines(sid, rec, toUuid(sid, desktop), now);
 }
 
 if (flag('--next-info')) {
