@@ -145,10 +145,11 @@ const hudMessage = function (m) { S.msg = m; statEl.textContent = m; if (S.ready
 
 const poll = async function () {
   if (document.hidden || S.posting) return;
+  const gen = setGen;
   try {
     const r = await fetch('state.json', { cache: 'no-store' });
     const s = await r.json();
-    if (S.posting) return;
+    if (S.posting || gen !== setGen) return;
     applyState(s); handleEvents(s);
     if (UI.settings) fetchRealLabels();
   } catch {
@@ -171,7 +172,9 @@ const lsRead = function () { try { return JSON.parse(localStorage.getItem(LS_KEY
 const lsWrite = function (o) { try { localStorage.setItem(LS_KEY, JSON.stringify(o)); } catch {} };
 
 let postChain = Promise.resolve();
+let setGen = 0;
 const saveSet = function (patch) {
+  setGen++;
   S.set = cleanSet({ ...S.set, ...patch });
   if (!SERVER) { lsWrite(S.set); return Promise.resolve(); }
   S.posting++;

@@ -22,13 +22,17 @@ const uiMeasure = function () {
   const devW = Math.max(1, stageEl.clientWidth * dpr), devH = Math.max(1, stageEl.clientHeight * dpr);
   const u = Math.max(S.s, Math.ceil(2 * dpr - 1e-6));
   U.u = u; U.W = Math.max(120, Math.floor(devW / u)); U.H = Math.max(120, Math.floor(devH / u));
-  uc.width = U.W; uc.height = U.H;
-  uctx = context2d(uc);
-  uctx.imageSmoothingEnabled = false;
+  const resized = uc.width !== U.W || uc.height !== U.H;
+  if (resized) {
+    uc.width = U.W; uc.height = U.H;
+    uctx = context2d(uc);
+    uctx.imageSmoothingEnabled = false;
+  }
   const cw = U.W * u / dpr, ch = U.H * u / dpr;
   uc.style.width = cw + 'px'; uc.style.height = ch + 'px';
   uiEl.style.width = cw + 'px'; uiEl.style.height = ch + 'px';
   UI.dirty = true;
+  if (resized) renderUi(S.t);
 };
 
 const uR = (x, y, w, h, col) => R(uctx, x, y, w, h, col);
@@ -119,27 +123,46 @@ const syncHit = function () {
   const prev = document.activeElement instanceof HTMLElement && hitEl.contains(document.activeElement) ? document.activeElement.dataset.id : null;
   const want = UI.refocus || prev;
   UI.refocus = null;
-  hitEl.textContent = '';
   const k = U.u / (window.devicePixelRatio || 1);
   hitEl.setAttribute('role', UI.settings || UI.tour ? 'dialog' : 'presentation');
   hitEl.setAttribute('aria-label', UI.tour ? 'Office tour' : 'Settings');
+  const old = new Map();
+  for (const el of [...hitEl.children]) if (el instanceof HTMLButtonElement) old.set(el.dataset.id, el);
+  const keep = new Set(UI.items.map((it) => it.id));
+  for (const [id, el] of old) if (!keep.has(id)) { el.remove(); old.delete(id); }
+  const order = [];
   for (const it of UI.items) {
-    const b = document.createElement('button');
-    b.type = 'button'; b.className = 'hb'; b.dataset.id = it.id; b.dataset.kind = it.kind;
+    const b = old.get(it.id) || newHit(it);
+    order.push(b);
     const pad = it.kind === 'up' || it.kind === 'down' || it.kind === 'close' ? 1 : 0;
     b.style.left = (it.x - pad) * k + 'px'; b.style.top = (it.y - pad) * k + 'px'; b.style.width = (it.w + 2 * pad) * k + 'px'; b.style.height = (it.h + 2 * pad) * k + 'px';
-    if (it.tab === -1) { b.tabIndex = -1; b.setAttribute('aria-hidden', 'true'); } else b.setAttribute('aria-label', it.label);
-    if (it.kind === 'toggle') { b.setAttribute('role', 'switch'); b.setAttribute('aria-checked', String(!!S.set[it.key])); }
-    if (it.kind === 'tick') { b.setAttribute('role', 'checkbox'); b.setAttribute('aria-checked', String(isOnAir(it.rid ?? ''))); }
+    if (it.tab !== -1) b.setAttribute('aria-label', it.label);
+    if (it.kind === 'toggle') b.setAttribute('aria-checked', String(!!S.set[it.key]));
+    if (it.kind === 'tick') b.setAttribute('aria-checked', String(isOnAir(it.rid ?? '')));
     if (it.kind === 'speed') b.setAttribute('aria-pressed', String(S.set.speed === it.v));
-    if (it.kind === 'row') wireRow(b, it);
-    else b.addEventListener('click', () => act(it));
-    hitEl.appendChild(b);
+  }
+  for (let i = 0; i < order.length;) {
+    const b = order[i], cur = hitEl.children[i];
+    if (cur === b) { i++; continue; }
+    if (cur && b === document.activeElement) { hitEl.appendChild(cur); continue; }
+    hitEl.insertBefore(b, cur || null);
+    i++;
   }
   if (want) {
     const el = hitEl.querySelector('[data-id="' + CSS.escape(want) + '"]');
     if (el instanceof HTMLElement) el.focus({ preventScroll: true });
   }
+};
+
+const newHit = function (it) {
+  const b = document.createElement('button');
+  b.type = 'button'; b.className = 'hb'; b.dataset.id = it.id; b.dataset.kind = it.kind;
+  if (it.tab === -1) { b.tabIndex = -1; b.setAttribute('aria-hidden', 'true'); }
+  if (it.kind === 'toggle') b.setAttribute('role', 'switch');
+  if (it.kind === 'tick') b.setAttribute('role', 'checkbox');
+  if (it.kind === 'row') wireRow(b, it);
+  else b.addEventListener('click', () => act(it));
+  return b;
 };
 
 hitEl.addEventListener('focusin', (e) => { const t = e.target; UI.focusId = t instanceof HTMLElement && t.matches(':focus-visible') ? t.dataset.id ?? '' : ''; });

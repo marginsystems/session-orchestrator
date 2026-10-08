@@ -1015,6 +1015,56 @@ const liveJob = async () => {
     await foreign.close();
     await ctx.close();
   }
+  {
+    const { ctx, page, errors } = await open(1280, 720, 1, base, 2500, true);
+    await page.click('#gear');
+    await page.waitForFunction(() => window.__office.ui().geo && document.querySelectorAll('#hit [data-kind="row"]').length === 4);
+    const start = await ev(page, () => window.__office.rooms().map((r) => r.id));
+    const rid = start[0];
+    await ev(page, () => {
+      const uc = document.querySelector('canvas#uc');
+      const g = window.__office.ui().geo;
+      const W = { nodes: new Set(document.querySelectorAll('#hit button')), hidden: 0, blank: 0, frames: 0, shifts: 0, geo: JSON.stringify(g) };
+      window['__steady'] = W;
+      new MutationObserver(() => { if (!document.getElementById('ui').classList.contains('on')) W.hidden++; }).observe(document.getElementById('ui'), { attributes: true });
+      const c = uc.getContext('2d');
+      const tick = () => {
+        W.frames++;
+        if (c.getImageData(g.x + 2, g.y + 2, 1, 1).data[3] === 0) W.blank++;
+        const now = window.__office.ui().geo;
+        if (JSON.stringify(now) !== W.geo) W.shifts++;
+        requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    });
+    const poke = () => ev(page, () => { window.__office.poll(); });
+    for (const [kind, n] of [['down', 3], ['up', 2]]) {
+      for (let i = 0; i < n; i++) {
+        await poke();
+        await page.locator(`[data-id="${kind}:${rid}"]`).click();
+        check(await ev(page, (id) => document.activeElement?.getAttribute('data-id') === id, `${kind}:${rid}`), `steady: focus left ${kind}:${rid} after a click`);
+      }
+    }
+    await page.locator(`[data-id="row:${rid}"]`).focus();
+    for (const key of ['ArrowUp', 'ArrowDown']) {
+      await poke();
+      await page.keyboard.press(key);
+      check(await ev(page, (id) => document.activeElement?.getAttribute('data-id') === id, `row:${rid}`), `steady: focus left the row after ${key}`);
+    }
+    await sleep(3500);
+    const expect = [start[1], rid, start[2], start[3]].join();
+    const order = await ev(page, () => window.__office.rooms().map((r) => r.id).join());
+    check(order === expect, `steady: floor order ${order} != ${expect}`);
+    const w = await ev(page, () => { const W = window['__steady'], now = [...document.querySelectorAll('#hit button')]; return { same: now.length === W.nodes.size && now.every((b) => W.nodes.has(b)), hidden: W.hidden, blank: W.blank, frames: W.frames, shifts: W.shifts, open: window.__office.ui().settings }; });
+    check(w.same, 'steady: settings controls were rebuilt instead of patched in place');
+    check(w.open && w.hidden === 0, `steady: settings panel was hidden ${w.hidden} times`);
+    check(w.frames > 30 && w.blank === 0, `steady: settings panel blank in ${w.blank} of ${w.frames} frames`);
+    check(w.shifts === 0, `steady: settings panel moved ${w.shifts} times`);
+    await page.screenshot({ path: join(SHOTS, 'live-steady.png') });
+    const real = errors.filter((e) => !e.includes('willReadFrequently'));
+    check(real.length === 0, 'steady console errors ' + real.join('|'));
+    await ctx.close();
+  }
   server.kill();
   rmSync(home, { recursive: true, force: true });
   say('live ok');
