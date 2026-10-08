@@ -475,7 +475,7 @@ function scanFull(now = Date.now(), queueSource) {
     const mode = cliToLocal.get(s.uuid)?.mode || '';
     const approval = kind === 'tool_use' && age >= APPROVAL_MS && mode !== '' && mode !== 'bypassPermissions';
     if (approval) state = 'idle';
-    if (waitingSet.has(s.uuid)) state = 'waiting';
+    if (waitingSet.has(s.uuid) && !approval) state = 'waiting';
     let name = NAMES[num(s.uuid) % NAMES.length];
     for (let n = 2; names.has(name); n++) name = NAMES[num(s.uuid) % NAMES.length] + ' ' + n;
     names.add(name);
