@@ -794,6 +794,26 @@ const goneJob = async () => {
   say('gone ok');
 };
 
+const permissionJob = async () => {
+  const home = mkdtempSync(join(tmpdir(), 'so-perm-'));
+  const fx = makeFixture(home);
+  const pick = (project, ageSec) => fx.find((f) => f.project === project && f.ageSec === ageSec);
+  const local = (f) => 'local_fx' + (fx.indexOf(f) - 1);
+  writeDesktop(home, 'local_fixture1', pick('atlas', 300).uuid, { title: 'Tidy the parser', lastActivityAt: Date.now(), permissionMode: 'default' });
+  writeDesktop(home, local(pick('beacon', 380)), pick('beacon', 380).uuid, { permissionMode: 'bypassPermissions' });
+  writeDesktop(home, local(pick('delta', 400)), pick('delta', 400).uuid, { permissionMode: 'auto' });
+  writeDesktop(home, local(pick('citadel', 100000)), pick('citadel', 100000).uuid, { permissionMode: 'default' });
+  const s = JSON.parse(execFileSync('node', [join(ROOT, 'scan.mjs'), '--once', '--json'], { env: { ...process.env, HOME: home }, encoding: 'utf8' }));
+  const agent = (f) => s.agents.find((x) => x.id === f.id);
+  const ask = agent(pick('atlas', 300)), bypass = agent(pick('beacon', 380)), auto = agent(pick('delta', 400)), done = agent(pick('citadel', 100000)), unknown = agent(pick('beacon', 200));
+  check(ask.approval === true && !ask.sleepy && ask.perm === undefined, `pending tool in default mode is not shown as needing approval ${JSON.stringify(ask)}`);
+  check(bypass.perm === 'bypass' && !bypass.approval, `bypass session ${JSON.stringify(bypass)}`);
+  check(auto.perm === 'auto' && auto.approval === true, `auto session with a pending tool ${JSON.stringify(auto)}`);
+  check(!done.approval && done.perm === undefined, `finished default session flagged ${JSON.stringify(done)}`);
+  check(!unknown.approval && unknown.perm === undefined, `session without a known mode flagged ${JSON.stringify(unknown)}`);
+  say('permissions ok');
+};
+
 const checkInJob = async () => {
   const home = mkdtempSync(join(tmpdir(), 'so-checkin-'));
   const fx = makeFixture(home);
@@ -1787,6 +1807,7 @@ add('crowd', ['server'], crowdJob, true);
 add('streamer', ['server'], streamerJob, true);
 add('gone', ['server'], goneJob, true);
 add('check-in', ['server'], checkInJob, true);
+add('permissions', ['server'], permissionJob, true);
 add('live', ['live'], liveJob, true);
 add('leave l1280', ['leave', 'ui'], () => leaveCheck(1280, 720, 'l1280'), true);
 add('leave l390', ['leave', 'ui'], () => leaveCheck(390, 844, 'l390'));
