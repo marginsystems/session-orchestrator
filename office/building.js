@@ -16,7 +16,7 @@ const stC = context2d(stCv);
 const speech = (text, t0, lift = 0) => ({ text, t0, lift });
 
 const newAgent = function (d) {
-  return { id: d.id, name: d.name, state: d.state, sleepy: !!d.sleepy, room: d.room, fr: d.room, slot: -1, x: 0, dy: 0, sit: 1, facing: 1, phase: 0, walking: false, away: false, q: false, title: d.title || '', inCab: false, alpha: 1, bubble: TYPE_ONLY ? speech('', 0) : null, gone: false, visitor: false, hop: 0, react: -9, seed: hash(d.id), st: styleFor(d.id), boss: false, spd: 0, joining: false, leaving: false };
+  return { id: d.id, name: d.name, state: d.state, sleepy: !!d.sleepy, perm: d.perm || '', approval: !!d.approval, room: d.room, fr: d.room, slot: -1, x: 0, dy: 0, sit: 1, facing: 1, phase: 0, walking: false, away: false, q: false, title: d.title || '', inCab: false, alpha: 1, bubble: TYPE_ONLY ? speech('', 0) : null, gone: false, visitor: false, hop: 0, react: -9, seed: hash(d.id), st: styleFor(d.id), boss: false, spd: 0, joining: false, leaving: false };
 };
 
 const BS = { react: -9, style: styleFor('boss', true) };
