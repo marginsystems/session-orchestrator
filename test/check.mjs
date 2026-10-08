@@ -782,6 +782,15 @@ const goneJob = async () => {
   check(s.queueSize === 0 && s.line.length === 0, `all gone waiting room ${JSON.stringify([s.line, s.queueSize])}`);
   writeQueue(home, ['local_fixture1']);
   check(!/GONE/.test(nextInfo()), 'GONE printed with no gone items');
+  check(/^CONTEXT_PERCENT: unknown$/m.test(nextInfo()), `context percent without usage ${nextInfo()}`);
+  const usageLine = (model, read) => JSON.stringify({ type: 'assistant', message: { model, content: [{ type: 'text', text: 'ok' }], usage: { input_tokens: 2, cache_creation_input_tokens: 83, cache_read_input_tokens: read } } }) + '\n';
+  appendFileSync(fx[0].file, usageLine('claude-opus-5-5', 260000) + usageLine('<synthetic>', 0));
+  info = nextInfo();
+  check(/^CONTEXT_TOKENS: 260085$/m.test(info) && /^CONTEXT_MODEL: "claude-opus-5-5"$/m.test(info) && /^CONTEXT_PERCENT: 26$/m.test(info), `context percent opus ${info}`);
+  appendFileSync(fx[0].file, usageLine('claude-new-model-9', 500000));
+  check(/^CONTEXT_PERCENT: unknown$/m.test(nextInfo()), `context percent unknown model ${nextInfo()}`);
+  appendFileSync(fx[0].file, usageLine('claude-new-model-9[1m]', 767560));
+  check(/^CONTEXT_PERCENT: 77$/m.test(nextInfo()), `context percent 1m model ${nextInfo()}`);
   say('gone ok');
 };
 

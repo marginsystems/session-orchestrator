@@ -544,16 +544,26 @@ function probe() {
   });
 }
 
-function contextTokens(path, size) {
-  let last = 0;
+const CONTEXT_WINDOWS = new Map([['claude-opus-5-5', 1000000]]);
+
+function contextWindow(model) {
+  if (/\[1m\]$/i.test(model)) return 1000000;
+  return CONTEXT_WINDOWS.get(model) || 0;
+}
+
+function contextUsage(path, size) {
+  let tokens = 0, model = '';
   for (const line of readTail(path, size).split('\n')) {
-    let usage;
-    try { usage = JSON.parse(line).message?.usage; } catch { continue; }
+    let message;
+    try { message = JSON.parse(line).message; } catch { continue; }
+    const usage = message?.usage;
+    if (message?.model === '<synthetic>') continue;
     if (usage && Number.isFinite(usage.input_tokens) && Number.isFinite(usage.cache_creation_input_tokens) && Number.isFinite(usage.cache_read_input_tokens)) {
-      last = usage.input_tokens + usage.cache_creation_input_tokens + usage.cache_read_input_tokens;
+      tokens = usage.input_tokens + usage.cache_creation_input_tokens + usage.cache_read_input_tokens;
+      model = typeof message.model === 'string' ? message.model : '';
     }
   }
-  return last;
+  return { tokens, model };
 }
 
 function nextInfo() {
@@ -579,7 +589,7 @@ function nextInfo() {
   const item = items[index];
   const prefix = goneLine + ['QUEUE_INDEX: ' + index, ...(settings.streamer ? ['DEFERRED: ' + index] : [])].join('\n') + '\n';
   const sid = typeof item === 'string' ? item : item && typeof item.sessionId === 'string' ? item.sessionId : '';
-  if (!sid) return prefix + 'SESSION_ID: "none"\nTITLE: "none"\nPROJECT: "none"\nCONTEXT_TOKENS: 0';
+  if (!sid) return prefix + 'SESSION_ID: "none"\nTITLE: "none"\nPROJECT: "none"\nCONTEXT_TOKENS: 0\nCONTEXT_PERCENT: unknown';
   const rec = sid.startsWith('local_') ? desktop.get(sid) : [...desktop.values()].find((r) => r.cli === sid);
   const uuid = toUuid(sid, desktop);
   let file = '';
@@ -591,22 +601,25 @@ function nextInfo() {
       } catch {}
     }
   } catch {}
-  let project = 'unknown', tokens = 0;
+  let project = 'unknown', tokens = 0, model = '';
   if (file) {
     let st;
     try { st = statSync(file); } catch {}
     if (st) {
       const info = analyzeCached(file, st);
       if (info.cwd) project = roomLabel(roomRoot(info.cwd));
-      tokens = contextTokens(file, st.size);
+      ({ tokens, model } = contextUsage(file, st.size));
     }
   }
+  const windowSize = contextWindow(model);
   return prefix + [
     'SESSION_ID: ' + JSON.stringify(sid),
     'TITLE: ' + JSON.stringify(rec && rec.title ? String(rec.title) : 'unknown'),
     'TITLE_AVAILABLE: ' + Boolean(rec && rec.title),
     'PROJECT: ' + JSON.stringify(project),
     'CONTEXT_TOKENS: ' + (tokens || 'unknown'),
+    'CONTEXT_MODEL: ' + JSON.stringify(model || 'unknown'),
+    'CONTEXT_PERCENT: ' + (tokens && windowSize ? Math.round((tokens / windowSize) * 100) : 'unknown'),
     'CHECKED_AT: ' + new Date(now).toISOString(),
   ].join('\n');
 }
