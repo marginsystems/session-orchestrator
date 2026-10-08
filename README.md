@@ -38,8 +38,6 @@ claude plugin marketplace add marginsystems/session-orchestrator
 claude plugin install session-orchestrator@session-orchestrator
 ```
 
-The repository is private for now, so the marketplace add needs git credentials that can read it.
-
 ### Plain `git clone`
 
 ```
